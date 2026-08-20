@@ -1,0 +1,12 @@
+# Adds the Host ledger and its Web client to a profile.
+# The storage-domain row is restated because a patch replaces its full config.
+- id: storage-domain
+  name: '@deepseek-ai/dsh-storage-domain'
+  config:
+    backend: json
+    routes:
+      usage_ledger: sqlite
+
+- insert:
+    - id: usage-ledger-plugin
+      name: 'dsh-plugin-usage-ledger'

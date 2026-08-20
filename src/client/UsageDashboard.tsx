@@ -1,0 +1,612 @@
+import { useEffect, useId, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import css from './UsageDashboard.module.css'
+
+type JsonRecord = Record<string, unknown>
+type Period = '7d' | '30d' | 'all'
+type ChartTarget = { readonly kind: 'requests' | 'tokens'; readonly index: number } | undefined
+
+interface UsageEvent {
+  readonly at: number
+  readonly model: string
+  readonly input: number
+  readonly output: number
+  readonly cached: number
+  readonly metered: boolean
+  readonly outcome: 'started' | 'success' | 'failure' | 'aborted'
+  readonly retried: boolean
+}
+
+interface ModelRow {
+  readonly model: string
+  readonly requests: number
+  readonly input: number
+  readonly output: number
+  readonly cached: number
+  readonly metered: number
+  readonly unmetered: number
+  readonly failed: number
+  readonly retried: number
+}
+
+interface UsageSnapshot {
+  readonly updatedAt: string | undefined
+  readonly throughDay: string | undefined
+  readonly events: readonly UsageEvent[]
+  readonly models: readonly ModelRow[]
+  readonly daily: readonly Bucket[]
+}
+
+interface Bucket {
+  readonly date: string
+  readonly requests: number
+  readonly input: number
+  readonly output: number
+  readonly cached: number
+  readonly metered: number
+  readonly unmetered: number
+  readonly failed: number
+  readonly retried: number
+}
+
+/** Dependencies supplied from the Usage plugin's apply closure. */
+export interface UsageDashboardInjected {
+  /** Read the current Host usage snapshot. */
+  readSnapshot: () => Promise<unknown>
+}
+
+/** Data and translation props consumed by the Usage dashboard in any Settings slot. */
+type UsageDashboardProps = PropsLocale<'settings.usage'> & UsageDashboardInjected
+
+type SnapshotState =
+  | { readonly status: 'loading'; readonly snapshot: UsageSnapshot | undefined; readonly error: undefined }
+  | { readonly status: 'ready'; readonly snapshot: UsageSnapshot; readonly error: undefined }
+  | { readonly status: 'error'; readonly snapshot: UsageSnapshot | undefined; readonly error: string }
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null
+}
+
+function textOf(record: JsonRecord, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.length > 0) return value
+  }
+  return undefined
+}
+
+function countOf(record: JsonRecord, keys: readonly string[]): number {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, value)
+  }
+  return 0
+}
+
+function recordsOf(record: JsonRecord, keys: readonly string[]): readonly JsonRecord[] {
+  for (const key of keys) {
+    const value = record[key]
+    if (Array.isArray(value)) return value.filter(isRecord)
+  }
+  return []
+}
+
+function dateOf(record: JsonRecord): number {
+  const value = record.timestamp ?? record.at ?? record.createdAt ?? record.time
+  if (typeof value === 'number' && Number.isFinite(value)) return value > 1_000_000_000_000 ? value : value * 1_000
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value)
+    if (!Number.isNaN(parsed)) return parsed
+  }
+  return 0
+}
+
+function localDay(time: number): string | undefined {
+  if (!Number.isFinite(time) || time <= 0) return undefined
+  const parts = new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(time))
+  const year = parts.find(part => part.type === 'year')?.value
+  const month = parts.find(part => part.type === 'month')?.value
+  const day = parts.find(part => part.type === 'day')?.value
+  return year === undefined || month === undefined || day === undefined ? undefined : `${year}-${month}-${day}`
+}
+
+function shiftDay(day: string, offset: number): string {
+  const date = new Date(`${day}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + offset)
+  return date.toISOString().slice(0, 10)
+}
+
+function dailyOf(record: JsonRecord): readonly Bucket[] {
+  return recordsOf(record, ['daily']).flatMap((row) => {
+    const day = textOf(row, ['day', 'date'])
+    if (day === undefined) return []
+    return [{
+      date: day,
+      requests: countOf(row, ['requests', 'requestCount', 'count']),
+      input: countOf(row, ['inputTokens', 'input', 'promptTokens', 'prompt']),
+      output: countOf(row, ['outputTokens', 'output', 'completionTokens', 'completion']),
+      cached: countOf(row, ['cacheReadTokens', 'cachedTokens', 'cached'])
+        + countOf(row, ['cacheWriteTokens', 'cacheWrite']),
+      metered: countOf(row, ['meteredRequests', 'metered']),
+      unmetered: countOf(row, ['unmeteredRequests', 'unmetered']),
+      failed: countOf(row, ['failedRequests', 'failures', 'failed']),
+      retried: countOf(row, ['retryRequests', 'retries', 'retried']),
+    }]
+  })
+}
+
+function eventOf(record: JsonRecord): UsageEvent {
+  const input = countOf(record, ['inputTokens', 'input', 'promptTokens', 'prompt'])
+  const output = countOf(record, ['outputTokens', 'output', 'completionTokens', 'completion'])
+  const cacheRead = countOf(record, ['cacheReadTokens', 'cachedTokens', 'cached'])
+  const cacheWrite = countOf(record, ['cacheWriteTokens', 'cacheWrite'])
+  const provider = textOf(record, ['provider', 'providerId'])
+  const model = textOf(record, ['model', 'modelId', 'modelName']) ?? 'Unknown model'
+  const rawOutcome = textOf(record, ['outcome', 'status'])
+  const outcome = rawOutcome === 'failure' || rawOutcome === 'failed'
+    ? 'failure'
+    : rawOutcome === 'aborted' || rawOutcome === 'abort'
+      ? 'aborted'
+      : rawOutcome === 'started' || rawOutcome === 'pending'
+        ? 'started'
+        : 'success'
+  return {
+    at: dateOf(record),
+    model: provider === undefined ? model : `${provider} / ${model}`,
+    input,
+    output,
+    cached: cacheRead + cacheWrite,
+    metered: 'meteredRequests' in record || 'metered' in record
+      ? countOf(record, ['meteredRequests', 'metered']) > 0
+      : ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'].some(key => key in record),
+    outcome,
+    retried: record.retried === true || countOf(record, ['retryRequests', 'retries', 'retried']) > 0,
+  }
+}
+
+function modelOf(record: JsonRecord): ModelRow {
+  const provider = textOf(record, ['provider', 'providerId'])
+  const model = textOf(record, ['model', 'modelId', 'name']) ?? 'Unknown model'
+  return {
+    model: provider === undefined ? model : `${provider} / ${model}`,
+    requests: countOf(record, ['requests', 'requestCount', 'count']),
+    input: countOf(record, ['inputTokens', 'input', 'promptTokens', 'prompt']),
+    output: countOf(record, ['outputTokens', 'output', 'completionTokens', 'completion']),
+    cached: countOf(record, ['cacheReadTokens', 'cachedTokens', 'cached'])
+      + countOf(record, ['cacheWriteTokens', 'cacheWrite']),
+    metered: countOf(record, ['meteredRequests', 'metered']),
+    unmetered: countOf(record, ['unmeteredRequests', 'unmetered']),
+    failed: countOf(record, ['failedRequests', 'failures', 'failed']),
+    retried: countOf(record, ['retryRequests', 'retries', 'retried']),
+  }
+}
+
+function mergeModelRows(rows: readonly ModelRow[]): readonly ModelRow[] {
+  const merged = new Map<string, ModelRow>()
+  for (const row of rows) {
+    const current = merged.get(row.model)
+    if (current === undefined) {
+      merged.set(row.model, row)
+      continue
+    }
+    merged.set(row.model, {
+      model: current.model,
+      requests: current.requests + row.requests,
+      input: current.input + row.input,
+      output: current.output + row.output,
+      cached: current.cached + row.cached,
+      metered: current.metered + row.metered,
+      unmetered: current.unmetered + row.unmetered,
+      failed: current.failed + row.failed,
+      retried: current.retried + row.retried,
+    })
+  }
+  return [...merged.values()]
+}
+
+function aggregateModels(events: readonly UsageEvent[]): readonly ModelRow[] {
+  const rows = new Map<string, ModelRow>()
+  for (const event of events) {
+    const current = rows.get(event.model) ?? {
+      model: event.model,
+      requests: 0,
+      input: 0,
+      output: 0,
+      cached: 0,
+      metered: 0,
+      unmetered: 0,
+      failed: 0,
+      retried: 0,
+    }
+    rows.set(event.model, {
+      model: current.model,
+      requests: current.requests + 1,
+      input: current.input + event.input,
+      output: current.output + event.output,
+      cached: current.cached + event.cached,
+      metered: current.metered + (event.metered ? 1 : 0),
+      unmetered: current.unmetered + (event.metered ? 0 : 1),
+      failed: current.failed + (event.outcome === 'failure' || event.outcome === 'aborted' ? 1 : 0),
+      retried: current.retried + (event.retried ? 1 : 0),
+    })
+  }
+  return [...rows.values()]
+}
+
+/** Normalize additive usage-ledger records without requiring a version-specific payload wrapper. */
+function normalizeSnapshot(value: unknown): UsageSnapshot {
+  const record = isRecord(value) ? value : {}
+  const daily = dailyOf(record)
+  let events = recordsOf(record, ['events', 'requests', 'entries', 'points']).map(eventOf)
+  if (events.length === 0) {
+    events = daily
+      .filter(row => row.requests > 0 || row.input > 0 || row.output > 0 || row.cached > 0)
+      .map(row => eventOf({
+        ...row,
+        at: Date.parse(`${row.date}T12:00:00`),
+        model: 'All models',
+      }))
+  }
+  const suppliedModels = recordsOf(record, ['models', 'byModel']).map(modelOf)
+  return {
+    updatedAt: textOf(record, ['updatedAt', 'generatedAt', 'asOf']),
+    throughDay: textOf(record, ['throughDay', 'toDay', 'endDay']),
+    events,
+    models: suppliedModels.length > 0 ? mergeModelRows(suppliedModels) : aggregateModels(events),
+    daily,
+  }
+}
+
+function numberText(value: number): string {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0, notation: value >= 10_000 ? 'compact' : 'standard' }).format(value)
+}
+
+function fullNumberText(value: number): string {
+  return new Intl.NumberFormat().format(value)
+}
+
+function dateText(value: string): string {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date(value)
+  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
+}
+
+function interpolate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{([^}]+)\}/g, (_, key: string) => values[key] ?? `{${key}}`)
+}
+
+function selectedEvents(
+  events: readonly UsageEvent[],
+  model: string,
+  period: Period,
+  throughDay: string | undefined,
+): readonly UsageEvent[] {
+  const byModel = model === 'all' ? events : events.filter(event => event.model === model)
+  if (period === 'all' || byModel.length === 0) return byModel
+  const endDay = throughDay ?? [...byModel]
+    .map(event => localDay(event.at))
+    .filter((day): day is string => day !== undefined)
+    .sort()
+    .at(-1)
+  if (endDay === undefined) return byModel
+  const startDay = shiftDay(endDay, -(period === '7d' ? 6 : 29))
+  return byModel.filter((event) => {
+    const day = localDay(event.at)
+    return day !== undefined && day >= startDay && day <= endDay
+  })
+}
+
+function bucketsOf(
+  events: readonly UsageEvent[],
+  period: Period,
+  daily: readonly Bucket[],
+  throughDay: string | undefined,
+  preferDaily: boolean,
+): readonly Bucket[] {
+  const eventDays = events.map(event => localDay(event.at)).filter((day): day is string => day !== undefined)
+  const dailyDays = daily
+    .filter(row => row.requests > 0 || row.input > 0 || row.output > 0 || row.cached > 0 || row.failed > 0)
+    .map(row => row.date)
+  const endDay = throughDay ?? [...(preferDaily ? dailyDays : eventDays)].sort().at(-1) ?? localDay(Date.now()) ?? '1970-01-01'
+  const dataDays = preferDaily ? dailyDays : eventDays
+  const startDay = period === 'all'
+    ? [...dataDays].sort().at(0) ?? endDay
+    : shiftDay(endDay, -(period === '7d' ? 6 : 29))
+  const days: string[] = []
+  for (let day = startDay; day <= endDay; day = shiftDay(day, 1)) days.push(day)
+  const buckets = days.map(date => ({ date, requests: 0, input: 0, output: 0, cached: 0, metered: 0, unmetered: 0, failed: 0, retried: 0 }))
+  const indexByDay = new Map(days.map((day, index) => [day, index] as const))
+  if (preferDaily && daily.length > 0) {
+    for (const row of daily) {
+      const index = indexByDay.get(row.date)
+      if (index === undefined) continue
+      buckets[index] = { ...row }
+    }
+    return buckets
+  }
+  for (const event of events) {
+    const day = localDay(event.at)
+    const index = day === undefined ? undefined : indexByDay.get(day)
+    const bucket = index === undefined ? undefined : buckets[index]
+    if (index === undefined || bucket === undefined) continue
+    buckets[index] = {
+      date: bucket.date,
+      requests: bucket.requests + 1,
+      input: bucket.input + event.input,
+      output: bucket.output + event.output,
+      cached: bucket.cached + event.cached,
+      metered: bucket.metered + (event.metered ? 1 : 0),
+      unmetered: bucket.unmetered + (event.metered ? 0 : 1),
+      failed: bucket.failed + (event.outcome === 'failure' || event.outcome === 'aborted' ? 1 : 0),
+      retried: bucket.retried + (event.retried ? 1 : 0),
+    }
+  }
+  return buckets
+}
+
+function curvePath(buckets: readonly Bucket[]): string {
+  const max = Math.max(1, ...buckets.map(bucket => bucket.requests))
+  const points = buckets.map((bucket, index) => ({
+    x: buckets.length === 1 ? 50 : (index / (buckets.length - 1)) * 100,
+    y: 36 - (bucket.requests / max) * 30,
+  }))
+  if (points.length === 0) return ''
+  if (points.length === 1) return `M ${points[0]?.x ?? 0} ${points[0]?.y ?? 36}`
+  let path = `M ${points[0]?.x ?? 0} ${points[0]?.y ?? 36}`
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1]
+    const point = points[index]
+    if (previous === undefined || point === undefined) continue
+    const midpoint = (previous.x + point.x) / 2
+    path += ` Q ${midpoint} ${previous.y}, ${point.x} ${point.y}`
+  }
+  return path
+}
+
+function totalOf(row: Pick<ModelRow, 'input' | 'output' | 'cached'>): number {
+  return row.input + row.output + row.cached
+}
+
+/** Render the settings Usage dashboard with local filter and tooltip state. */
+export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactNode {
+  const tooltipId = useId()
+  const [state, setState] = useState<SnapshotState>({ status: 'loading', snapshot: undefined, error: undefined })
+  const [request, setRequest] = useState(0)
+  const [model, setModel] = useState('all')
+  const [period, setPeriod] = useState<Period>('30d')
+  const [target, setTarget] = useState<ChartTarget>(undefined)
+
+  useEffect(() => {
+    let current = true
+    setState(previous => ({ status: 'loading', snapshot: previous.snapshot, error: undefined }))
+    void readSnapshot().then(
+      (snapshot) => { if (current) setState({ status: 'ready', snapshot: normalizeSnapshot(snapshot), error: undefined }) },
+      (error: unknown) => {
+        if (!current) return
+        setState(previous => ({
+          status: 'error',
+          snapshot: previous.snapshot,
+          error: error instanceof Error ? error.message : '',
+        }))
+      },
+    )
+    return () => { current = false }
+  }, [readSnapshot, request])
+
+  const snapshot = state.snapshot
+  const models = useMemo(
+    () => snapshot === undefined ? [] : [...snapshot.models].sort((left, right) => totalOf(right) - totalOf(left)),
+    [snapshot],
+  )
+  const events = useMemo(
+    () => snapshot === undefined ? [] : selectedEvents(snapshot.events, model, period, snapshot.throughDay),
+    [model, period, snapshot],
+  )
+  const buckets = useMemo(
+    () => snapshot === undefined ? [] : bucketsOf(events, period, snapshot.daily, snapshot.throughDay, model === 'all'),
+    [events, model, period, snapshot],
+  )
+  const visibleModels = useMemo(
+    () => [...aggregateModels(events)].sort((left, right) => totalOf(right) - totalOf(left)),
+    [events],
+  )
+  const totals = useMemo(() => events.reduce((total, event) => ({
+    requests: total.requests + 1,
+    input: total.input + event.input,
+    output: total.output + event.output,
+    cached: total.cached + event.cached,
+    unmetered: total.unmetered + (event.metered ? 0 : 1),
+    failed: total.failed + (event.outcome === 'failure' || event.outcome === 'aborted' ? 1 : 0),
+    retried: total.retried + (event.retried ? 1 : 0),
+  }), { requests: 0, input: 0, output: 0, cached: 0, unmetered: 0, failed: 0, retried: 0 }), [events])
+  const curve = useMemo(() => curvePath(buckets), [buckets])
+  const activeBucket = target === undefined ? undefined : buckets[target.index]
+  const maxTokens = Math.max(1, ...buckets.map(bucket => bucket.input + bucket.output + bucket.cached))
+  const tokenText = (value: number): string => fullNumberText(value)
+
+  const refresh = (): void => { setRequest(current => current + 1) }
+  const showTarget = (next: Exclude<ChartTarget, undefined>): void => { setTarget(next) }
+  const toggleTarget = (next: Exclude<ChartTarget, undefined>): void => {
+    setTarget(current => current?.kind === next.kind && current.index === next.index ? undefined : next)
+  }
+
+  if (snapshot === undefined) {
+    return (
+      <div className={css.section} aria-busy={state.status === 'loading'}>
+        {state.status === 'loading' ? <p className={css.status}>{t('loading')}</p> : null}
+        {state.status === 'error' ? (
+          <div className={css.failure} role="alert">
+            <p>{t('loadFailed')}</p>
+            <button type="button" onClick={refresh}>{t('retry')}</button>
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
+  return (
+    <section className={css.section} aria-busy={state.status === 'loading'}>
+      <header className={css.header}>
+        <div>
+          <p className={css.eyebrow}>API / LEDGER</p>
+          <h2>{t('title')}</h2>
+          <p className={css.intro}>{t('intro')}</p>
+        </div>
+        <button type="button" className={css.refresh} disabled={state.status === 'loading'} onClick={refresh}>
+          {state.status === 'loading' ? t('refreshing') : t('refresh')}
+        </button>
+      </header>
+
+      {state.status === 'error' ? (
+        <p className={css.stale} role="status">{t('showingLastGood')}</p>
+      ) : null}
+      {snapshot.updatedAt === undefined ? null : <p className={css.updated}>{interpolate(t('updated'), { time: snapshot.updatedAt })}</p>}
+
+      <div className={css.filters}>
+        <label>
+          <span>{t('model')}</span>
+          <select value={model} onChange={(event) => { setModel(event.currentTarget.value) }}>
+            <option value="all">{t('allModels')}</option>
+            {models.map(row => <option key={row.model} value={row.model}>{row.model}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>{t('period')}</span>
+          <select value={period} onChange={(event) => { setPeriod(event.currentTarget.value as Period) }}>
+            <option value="7d">{t('sevenDays')}</option>
+            <option value="30d">{t('thirtyDays')}</option>
+            <option value="all">{t('allTime')}</option>
+          </select>
+        </label>
+      </div>
+
+      {events.length === 0 ? <p className={css.empty}>{t('noData')}</p> : (
+        <>
+          <div className={css.metrics}>
+            <Metric className={css.metricTotal} label={t('totalTokens')} value={tokenText(totals.input + totals.output + totals.cached)} />
+            <Metric label={t('requests')} value={numberText(totals.requests)} />
+            <Metric label={t('inputTokens')} value={tokenText(totals.input)} />
+            <Metric label={t('outputTokens')} value={tokenText(totals.output)} />
+            <Metric label={t('unmeteredRequests')} value={numberText(totals.unmetered)} />
+            <Metric label={t('failedRequests')} value={numberText(totals.failed)} />
+            <Metric label={t('retryRequests')} value={numberText(totals.retried)} />
+          </div>
+
+          <div className={css.charts}>
+            <article className={css.chartCard}>
+              <div className={css.chartHeading}><h3>{t('requestCurve')}</h3><span>{numberText(totals.requests)}</span></div>
+              <div className={css.curveChart}>
+                <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+                  <path className={css.gridLine} d="M 0 36 H 100" />
+                  <path className={css.curve} d={curve} />
+                  {buckets.map((bucket, index) => {
+                    const max = Math.max(1, ...buckets.map(candidate => candidate.requests))
+                    const x = buckets.length === 1 ? 50 : (index / (buckets.length - 1)) * 100
+                    const y = 36 - (bucket.requests / max) * 30
+                    return <circle key={bucket.date} className={css.curvePoint} cx={x} cy={y} r="1.3" />
+                  })}
+                </svg>
+                <div
+                  className={css.hitTargets}
+                  style={{ '--usage-buckets': buckets.length } as CSSProperties}
+                >
+                  {buckets.map((bucket, index) => {
+                    const next = { kind: 'requests' as const, index }
+                    return (
+                      <button
+                        key={bucket.date}
+                        type="button"
+                        aria-describedby={target?.kind === 'requests' && target.index === index ? tooltipId : undefined}
+                        aria-label={interpolate(t('requestsOn'), { date: dateText(bucket.date), requests: fullNumberText(bucket.requests), failed: fullNumberText(bucket.failed), retried: fullNumberText(bucket.retried) })}
+                        onFocus={() => { showTarget(next) }}
+                        onPointerEnter={() => { showTarget(next) }}
+                        onPointerLeave={() => { setTarget(undefined) }}
+                        onClick={() => { toggleTarget(next) }}
+                      />
+                    )
+                  })}
+                </div>
+              </div>
+            </article>
+
+            <article className={css.chartCard}>
+              <div className={css.chartHeading}><h3>{t('tokenFlow')}</h3><span>{tokenText(totals.input + totals.output + totals.cached)}</span></div>
+              <div className={css.barChart}>
+                {buckets.map((bucket, index) => {
+                  const next = { kind: 'tokens' as const, index }
+                  const barStyle = {
+                    '--input-height': `${(bucket.input / maxTokens) * 100}%`,
+                    '--output-height': `${(bucket.output / maxTokens) * 100}%`,
+                    '--cached-height': `${(bucket.cached / maxTokens) * 100}%`,
+                  } as CSSProperties
+                  return (
+                    <button
+                      key={bucket.date}
+                      type="button"
+                      className={css.tokenBar}
+                      style={barStyle}
+                      aria-describedby={target?.kind === 'tokens' && target.index === index ? tooltipId : undefined}
+                      aria-label={interpolate(t('tokensOn'), {
+                        date: dateText(bucket.date),
+                        input: tokenText(bucket.input),
+                        output: tokenText(bucket.output),
+                        cached: tokenText(bucket.cached),
+                      })}
+                      onFocus={() => { showTarget(next) }}
+                      onPointerEnter={() => { showTarget(next) }}
+                      onPointerLeave={() => { setTarget(undefined) }}
+                      onClick={() => { toggleTarget(next) }}
+                    >
+                      <span className={css.inputBar} />
+                      <span className={css.outputBar} />
+                      <span className={css.cachedBar} />
+                    </button>
+                  )
+                })}
+              </div>
+            </article>
+          </div>
+
+          <div
+            className={`${css.tooltip} ${activeBucket === undefined ? css.tooltipHidden : ''}`}
+            id={tooltipId}
+            role="tooltip"
+            aria-hidden={activeBucket === undefined}
+          >
+            {activeBucket === undefined ? null : (
+              <>
+                <strong>{dateText(activeBucket.date)}</strong>
+                {target?.kind === 'requests'
+                  ? <span>{interpolate(t('requestsOn'), { date: '', requests: fullNumberText(activeBucket.requests), failed: fullNumberText(activeBucket.failed), retried: fullNumberText(activeBucket.retried) }).replace(/^：|^: /, '')}</span>
+                  : <span>{interpolate(t('tokensOn'), { date: '', input: tokenText(activeBucket.input), output: tokenText(activeBucket.output), cached: tokenText(activeBucket.cached) }).replace(/^：|^: /, '')}</span>}
+              </>
+            )}
+          </div>
+
+          <article className={css.tableCard}>
+            <div className={css.chartHeading}><h3>{t('modelBreakdown')}</h3><span>{visibleModels.length}</span></div>
+            <div className={css.tableScroll}>
+              <table>
+                <thead><tr><th>{t('tableModel')}</th><th>{t('tableRequests')}</th><th>{t('tableFailed')}</th><th>{t('tableRetries')}</th><th>{t('tableInput')}</th><th>{t('tableOutput')}</th><th>{t('tableTotal')}</th></tr></thead>
+                <tbody>{visibleModels.filter(row => model === 'all' || row.model === model).map(row => (
+                  <tr key={row.model}><th scope="row">{row.model}</th><td>{numberText(row.requests)}</td><td>{numberText(row.failed)}</td><td>{numberText(row.retried)}</td><td>{tokenText(row.input)}</td><td>{tokenText(row.output)}</td><td>{tokenText(totalOf(row))}</td></tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </article>
+        </>
+      )}
+    </section>
+  )
+}
+
+function Metric(
+  { label, value, className }:
+  { readonly label: string; readonly value: string; readonly className?: string | undefined },
+): ReactNode {
+  const metricClass = className === undefined ? css.metric : `${css.metric} ${className}`
+  return <div className={metricClass}><span>{label}</span><strong>{value}</strong></div>
+}

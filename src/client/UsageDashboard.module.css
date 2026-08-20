@@ -1,0 +1,414 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 840px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.header h2,
+.header p,
+.chartHeading h3,
+.stale,
+.updated,
+.empty,
+.status,
+.failure p {
+  margin: 0;
+}
+
+.eyebrow {
+  color: var(--dsw-alias-label-tertiary);
+  font-family: var(--ds-font-family-code);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 18px;
+}
+
+.header h2 {
+  margin-top: 2px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 30px;
+}
+
+.intro {
+  max-width: 560px;
+  margin-top: 4px !important;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.refresh,
+.failure button {
+  box-sizing: border-box;
+  flex: none;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 16px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 30px;
+  cursor: pointer;
+}
+
+.refresh:hover:not(:disabled),
+.failure button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.refresh:focus-visible,
+.failure button:focus-visible,
+.filters select:focus-visible,
+.hitTargets button:focus-visible,
+.tokenBar:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}
+
+.refresh:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.stale,
+.updated,
+.status,
+.empty {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.stale {
+  color: var(--dsw-alias-state-warn-label);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-module-platform);
+}
+
+.filters label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.filters select {
+  min-width: 120px;
+  max-width: 260px;
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 12px;
+  border-left: 1px solid var(--dsw-alias-border-l2);
+}
+
+.metric:first-child {
+  border-left: 0;
+}
+
+.metricTotal {
+  grid-column: 1 / -1;
+  border-left: 0;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.metrics > .metric:nth-child(3n + 2) {
+  border-left: 0;
+}
+
+.metric span,
+.chartHeading span {
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.metric strong {
+  font-family: var(--ds-font-family-code);
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+  line-height: 24px;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.chartCard,
+.tableCard {
+  min-width: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--dsw-alias-bg-layer-3);
+}
+
+/* The table scrolls inside an elevated surface, so its scrollbar inherits the
+ * thumb colors for this card rather than the page beneath it. */
+.tableCard {
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.chartHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.chartHeading h3 {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.curveChart {
+  position: relative;
+  height: 136px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+.curveChart svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.gridLine {
+  fill: none;
+  stroke: var(--dsw-alias-border-l2);
+  stroke-width: 0.4;
+}
+
+.curve {
+  fill: none;
+  stroke: var(--dsw-alias-state-business-primary);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+
+.curvePoint {
+  fill: var(--dsw-alias-bg-layer-3);
+  stroke: var(--dsw-alias-state-business-primary);
+  stroke-width: 0.7;
+  vector-effect: non-scaling-stroke;
+}
+
+.hitTargets {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--usage-buckets, 7), minmax(0, 1fr));
+}
+
+.hitTargets button {
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.hitTargets button:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.barChart {
+  display: flex;
+  align-items: end;
+  gap: 0;
+  height: 136px;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+}
+
+/* Adjacent hit targets prevent pointer gaps; inset padding separates the colored bars visually. */
+.tokenBar {
+  display: flex;
+  box-sizing: border-box;
+  min-width: 0;
+  flex: 1 1 0;
+  height: 100%;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  gap: 1px;
+  border: 0;
+  border-radius: 3px 3px 0 0;
+  padding: 0 2px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.tokenBar:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.inputBar,
+.outputBar,
+.cachedBar {
+  display: block;
+  min-height: 0;
+  border-radius: 2px 2px 0 0;
+}
+
+.inputBar { height: var(--input-height); background: var(--dsw-alias-state-business-primary); }
+.outputBar { height: var(--output-height); background: var(--dsw-alias-state-success-primary); }
+.cachedBar { height: var(--cached-height); background: var(--dsw-alias-label-tertiary); }
+
+.tooltip {
+  display: flex;
+  height: 34px;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+  gap: 8px;
+  overflow: hidden;
+  padding: 8px 10px;
+  border-left: 2px solid var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.tooltipHidden {
+  visibility: hidden;
+}
+
+.tooltip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tooltip strong {
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+
+.tableScroll {
+  overflow-x: auto;
+}
+
+.tableScroll table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.tableScroll th,
+.tableScroll td {
+  padding: 8px 6px;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.tableScroll thead th {
+  border-top: 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.tableScroll th:first-child {
+  max-width: 220px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tableScroll tbody th {
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--ds-font-family-code);
+  font-weight: 500;
+}
+
+.failure {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .curve,
+  .curvePoint,
+  .tokenBar span {
+    transition: all 160ms var(--ds-ease-in-out);
+  }
+}
+
+@media (max-width: 680px) {
+  .header { flex-direction: column; }
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .metrics > .metric:nth-child(2n) { border-left: 0; }
+  .metrics > .metric:nth-child(5) { border-left: 1px solid var(--dsw-alias-border-l2); }
+  .metric:nth-child(4),
+  .metric:nth-child(6) { border-top: 1px solid var(--dsw-alias-border-l2); }
+  .charts { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .curve,
+  .curvePoint,
+  .tokenBar span { transition: none; }
+}
