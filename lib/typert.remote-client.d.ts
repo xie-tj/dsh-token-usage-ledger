@@ -6,14 +6,14 @@ import type {
 import type { UsageLedgerSnapshot, UsageLedgerSnapshotRequest } from 'dsh-plugin-usage-ledger/types'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
-  interface TypertRemoteNamespace$75736167654c6564676572 {
+  interface TypertRemoteNamespace$75736167654c6564676572506c7567696e {
     snapshot: (request?: UsageLedgerSnapshotRequest) => Promise<RemoteResult<UsageLedgerSnapshot>>
   }
   interface TypertRemoteMap {
-    'usageLedger/snapshot': (request?: UsageLedgerSnapshotRequest) => Promise<RemoteResult<UsageLedgerSnapshot>>
+    'usageLedgerPlugin/snapshot': (request?: UsageLedgerSnapshotRequest) => Promise<RemoteResult<UsageLedgerSnapshot>>
   }
   interface TypertRemoteNamespaceMap {
-    'usageLedger': TypertRemoteNamespace$75736167654c6564676572
+    'usageLedgerPlugin': TypertRemoteNamespace$75736167654c6564676572506c7567696e
   }
 }
 

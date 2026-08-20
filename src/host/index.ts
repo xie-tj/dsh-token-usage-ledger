@@ -199,7 +199,7 @@ export class UsageLedgerService extends TypertRemoteService {
   private accepting = true
 
   constructor(ctx: Context) {
-    super(ctx, 'usageLedger')
+    super(ctx, 'usageLedger', { namespace: 'usageLedgerPlugin' })
     ctx.inject(['settings'], (settingsCtx) => {
       settingsCtx.settings.register(USAGE_LEDGER_SETTINGS_NAMESPACE, UsageLedgerSettingsSchema)
     })

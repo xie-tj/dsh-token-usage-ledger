@@ -16,7 +16,7 @@ dsh --profile web
 
 - Host：监听 `llm/request-attempt`，将请求尝试和报告的 token 用量写入 `usage_ledger` 存储域，并从历史 session 回填。
 - Client：注册 `settings.section` 的 `usage` 页面和 `settings.plugin.item` 的 `usage-ledger` 配置卡片。
-- Remote：客户端在目标 dsh 已提供 `usageLedger` Remote 时复用；缺失时由本插件挂载生成的 Remote 描述符。
+- Remote：客户端使用本插件独立的 `usageLedgerPlugin` namespace，避免与目标 dsh 可能内置的 `usageLedger` Remote 冲突。
 - 构建产物：仓库提交可直接加载的 `lib/client.js` 和 Typert 产物，不要求 Git 安装时执行构建脚本。
 
 ## 兼容性

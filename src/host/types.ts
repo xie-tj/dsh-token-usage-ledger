@@ -90,7 +90,7 @@ export interface UsageLedgerSnapshotRequest {
   readonly timeZone?: string
 }
 
-/** Read-only usage summary returned by `usageLedger/snapshot`. */
+/** Read-only usage summary returned by `usageLedgerPlugin/snapshot`. */
 export interface UsageLedgerSnapshot {
   /** Resolved workspace filter: `null` means every workspace. */
   readonly workspace: string | null

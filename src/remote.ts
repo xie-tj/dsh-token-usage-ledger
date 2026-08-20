@@ -61,23 +61,23 @@ const snapshotSchema = z.object({
 })
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
-  interface TypertRemoteNamespace$UsageLedger {
+  interface TypertRemoteNamespace$UsageLedgerPlugin {
     snapshot: (request?: UsageLedgerSnapshotRequest) => Promise<RemoteResult<UsageLedgerSnapshot>>
   }
   interface TypertRemoteMap {
-    'usageLedger/snapshot': (request?: UsageLedgerSnapshotRequest) => Promise<RemoteResult<UsageLedgerSnapshot>>
+    'usageLedgerPlugin/snapshot': (request?: UsageLedgerSnapshotRequest) => Promise<RemoteResult<UsageLedgerSnapshot>>
   }
   interface TypertRemoteNamespaceMap {
-    usageLedger: TypertRemoteNamespace$UsageLedger
+    usageLedgerPlugin: TypertRemoteNamespace$UsageLedgerPlugin
   }
 }
 
 const TYPERT_REMOTE: TypertRemoteContribution = {
   package: 'dsh-plugin-usage-ledger',
   descriptors: [{
-    id: 'dsh-plugin-usage-ledger#usageLedger/snapshot',
+    id: 'dsh-plugin-usage-ledger#usageLedgerPlugin/snapshot',
     service: 'usageLedger',
-    namespace: 'usageLedger',
+    namespace: 'usageLedgerPlugin',
     method: 'snapshot',
     invocation: { kind: 'direct' },
     parameters: [{
