@@ -39,6 +39,7 @@ export declare const zh: {
     tableRetries: string;
     tableInput: string;
     tableOutput: string;
+    tableCacheHit: string;
     tableTotal: string;
 };
 /** Usage Settings locale key union. */
@@ -83,5 +84,6 @@ export declare const en: {
     tableRetries: string;
     tableInput: string;
     tableOutput: string;
+    tableCacheHit: string;
     tableTotal: string;
 };

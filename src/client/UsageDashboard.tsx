@@ -21,6 +21,7 @@ interface UsageEvent {
   readonly input: number
   readonly output: number
   readonly cached: number
+  readonly cacheHit: number
   readonly metered: boolean
   readonly outcome: 'started' | 'success' | 'failure' | 'aborted'
   readonly retried: boolean
@@ -32,6 +33,7 @@ interface ModelRow {
   readonly input: number
   readonly output: number
   readonly cached: number
+  readonly cacheHit: number
   readonly metered: number
   readonly unmetered: number
   readonly failed: number
@@ -105,6 +107,7 @@ function mergeModelRows(rows: readonly ModelRow[]): readonly ModelRow[] {
       input: current.input + row.input,
       output: current.output + row.output,
       cached: current.cached + row.cached,
+      cacheHit: current.cacheHit + row.cacheHit,
       metered: current.metered + row.metered,
       unmetered: current.unmetered + row.unmetered,
       failed: current.failed + row.failed,
@@ -123,6 +126,7 @@ function aggregateModels(events: readonly UsageEvent[]): readonly ModelRow[] {
       input: 0,
       output: 0,
       cached: 0,
+      cacheHit: 0,
       metered: 0,
       unmetered: 0,
       failed: 0,
@@ -134,6 +138,7 @@ function aggregateModels(events: readonly UsageEvent[]): readonly ModelRow[] {
       input: current.input + event.input,
       output: current.output + event.output,
       cached: current.cached + event.cached,
+      cacheHit: current.cacheHit + event.cacheHit,
       metered: current.metered + (event.metered ? 1 : 0),
       unmetered: current.unmetered + (event.metered ? 0 : 1),
       failed: current.failed + (event.outcome === 'failure' || event.outcome === 'aborted' ? 1 : 0),
@@ -160,6 +165,7 @@ export function projectSnapshot(snapshot: UsageLedgerSnapshot): UsageSnapshot {
       input: event.inputTokens ?? 0,
       output: event.outputTokens ?? 0,
       cached: (event.cacheReadTokens ?? 0) + (event.cacheWriteTokens ?? 0),
+      cacheHit: event.cacheReadTokens ?? 0,
       metered: hasUsage,
       outcome: event.outcome,
       retried: event.retried,
@@ -171,6 +177,7 @@ export function projectSnapshot(snapshot: UsageLedgerSnapshot): UsageSnapshot {
     input: row.inputTokens,
     output: row.outputTokens,
     cached: row.cacheReadTokens + row.cacheWriteTokens,
+    cacheHit: row.cacheReadTokens,
     metered: row.meteredRequests,
     unmetered: row.unmeteredRequests,
     failed: row.failedRequests,
@@ -529,9 +536,9 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
             <div className={css.chartHeading}><h3>{t('modelBreakdown')}</h3><span>{visibleModels.length}</span></div>
             <div className={css.tableScroll}>
               <table>
-                <thead><tr><th>{t('tableModel')}</th><th>{t('tableRequests')}</th><th>{t('tableFailed')}</th><th>{t('tableRetries')}</th><th>{t('tableInput')}</th><th>{t('tableOutput')}</th><th>{t('tableTotal')}</th></tr></thead>
+                <thead><tr><th>{t('tableModel')}</th><th>{t('tableRequests')}</th><th>{t('tableFailed')}</th><th>{t('tableRetries')}</th><th>{t('tableInput')}</th><th>{t('tableOutput')}</th><th>{t('tableCacheHit')}</th><th>{t('tableTotal')}</th></tr></thead>
                 <tbody>{visibleModels.filter(row => model === 'all' || row.model === model).map(row => (
-                  <tr key={row.model}><th scope="row">{row.model}</th><td>{exactCountText(row.requests)}</td><td>{exactCountText(row.failed)}</td><td>{exactCountText(row.retried)}</td><td>{tokenText(row.input)}</td><td>{tokenText(row.output)}</td><td>{tokenText(totalOf(row))}</td></tr>
+                  <tr key={row.model}><th scope="row">{row.model}</th><td>{exactCountText(row.requests)}</td><td>{exactCountText(row.failed)}</td><td>{exactCountText(row.retried)}</td><td>{tokenText(row.input)}</td><td>{tokenText(row.output)}</td><td>{tokenText(row.cacheHit)}</td><td>{tokenText(totalOf(row))}</td></tr>
                 ))}</tbody>
               </table>
             </div>

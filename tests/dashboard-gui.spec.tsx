@@ -90,6 +90,8 @@ describe('Usage dashboard GUI', () => {
       expect(readSnapshot).toHaveBeenCalledOnce()
       expect(container.textContent).toContain('deepseek / chat')
       expect(container.textContent).toContain('modelBreakdown')
+      expect(container.textContent).toContain('tableCacheHit')
+      expect(container.textContent).toContain('13')
       expect(container.textContent).toContain(String(manyRequests))
       expect(container.textContent).not.toContain('1万')
       expect(container.querySelectorAll('select')).toHaveLength(2)

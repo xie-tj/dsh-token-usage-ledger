@@ -104,7 +104,7 @@ Client Usage 页面不使用这些默认天数：它显式请求 `{ days: 366, t
 - `retryRequests` 标记因 `llm/retry-started` 而被后续 attempt 重试的最近 failure/aborted attempt；它不是额外生成的一次请求。
 - provider/model 优先来自 `llm/request-attempt`；仅 legacy 回填使用最近的 request route。
 - `inputTokens` 是 provider 报告的非缓存输入 token，`outputTokens` 包含 provider 报告在输出中的 reasoning token。
-- `cacheReadTokens` 与 `cacheWriteTokens` 在 API 和持久化中分开保存。Web 页面将二者相加显示为 Cached，并把 Input + Output + Cache Read + Cache Write 作为 Token Total。
+- `cacheReadTokens` 与 `cacheWriteTokens` 在 API 和持久化中分开保存。Web 的 Token 流量将二者相加显示为 Cached，模型明细另外显示 `cacheReadTokens` 作为缓存命中；Input + Output + Cache Read + Cache Write 组成 Token Total。
 - final assistant-message usage 优先于最后一个 provisional usage chunk。两者都不存在时，该 attempt 仍计入请求数，但计为 unmetered，token 为 0。
 - Host 按 workspace/provider/model 分组；当前 Web 页面在显示所有 workspace 时会把相同 provider/model 的 workspace 行合并。
 

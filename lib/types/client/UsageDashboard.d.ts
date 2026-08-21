@@ -11,6 +11,7 @@ interface UsageEvent {
     readonly input: number;
     readonly output: number;
     readonly cached: number;
+    readonly cacheHit: number;
     readonly metered: boolean;
     readonly outcome: 'started' | 'success' | 'failure' | 'aborted';
     readonly retried: boolean;
@@ -21,6 +22,7 @@ interface ModelRow {
     readonly input: number;
     readonly output: number;
     readonly cached: number;
+    readonly cacheHit: number;
     readonly metered: number;
     readonly unmetered: number;
     readonly failed: number;
