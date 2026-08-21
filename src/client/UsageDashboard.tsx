@@ -345,7 +345,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
   const [provider, setProvider] = useState('all')
   const [model, setModel] = useState('all')
   const [period, setPeriod] = useState<Period>('30d')
-  const [showProvider, setShowProvider] = useState(true)
+  const [showProvider, setShowProvider] = useState(false)
   const [target, setTarget] = useState<ChartTarget>(undefined)
 
   useEffect(() => {
@@ -592,9 +592,9 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
             </div>
             <div className={css.tableScroll}>
               <table>
-                <thead><tr><th>{t('tableModel')}</th><th>{t('tableInput')}</th><th>{t('tableOutput')}</th><th>{t('tableCacheHit')}</th><th>{t('tableTotal')}</th><th>{t('tableRequests')}</th><th>{t('tableFailed')}</th><th>{t('tableRetries')}</th></tr></thead>
+                <thead><tr><th>{t('tableModel')}</th><th>{t('tableTotal')}</th><th>{t('tableInput')}</th><th>{t('tableOutput')}</th><th>{t('tableCacheHit')}</th><th>{t('tableRequests')}</th><th>{t('tableFailed')}</th><th>{t('tableRetries')}</th></tr></thead>
                 <tbody>{visibleModels.map(row => (
-                  <tr key={`${row.provider}\u0000${row.model}`}><th scope="row">{modelLabel(row, showProvider)}</th><td>{compactNumberText(row.input)}</td><td>{compactNumberText(row.output)}</td><td>{compactNumberText(row.cacheHit)}</td><td>{compactNumberText(totalOf(row))}</td><td>{compactNumberText(row.requests)}</td><td>{compactNumberText(row.failed)}</td><td>{compactNumberText(row.retried)}</td></tr>
+                  <tr key={`${row.provider}\u0000${row.model}`}><th scope="row">{modelLabel(row, showProvider)}</th><td>{compactNumberText(totalOf(row))}</td><td>{compactNumberText(row.input)}</td><td>{compactNumberText(row.output)}</td><td>{compactNumberText(row.cacheHit)}</td><td>{compactNumberText(row.requests)}</td><td>{compactNumberText(row.failed)}</td><td>{compactNumberText(row.retried)}</td></tr>
                 ))}</tbody>
               </table>
             </div>

@@ -88,12 +88,13 @@ describe('Usage dashboard GUI', () => {
         await Promise.resolve()
       })
       expect(readSnapshot).toHaveBeenCalledOnce()
-      expect(container.textContent).toContain('deepseek / chat')
+      expect(container.textContent).toContain('chat')
+      expect(container.textContent).not.toContain('deepseek / chat')
       expect(container.textContent).toContain('modelBreakdown')
       expect(container.textContent).toContain('tableCacheHit')
       expect(container.textContent).toContain('13')
       expect([...container.querySelectorAll('thead th')].map(header => header.textContent)).toEqual([
-        'tableModel', 'tableInput', 'tableOutput', 'tableCacheHit', 'tableTotal', 'tableRequests', 'tableFailed', 'tableRetries',
+        'tableModel', 'tableTotal', 'tableInput', 'tableOutput', 'tableCacheHit', 'tableRequests', 'tableFailed', 'tableRetries',
       ])
       expect(container.textContent).toContain(String(manyRequests))
       expect(container.textContent).toContain('10K')
@@ -106,10 +107,9 @@ describe('Usage dashboard GUI', () => {
       expect(container.textContent).toContain('showProvider')
       const showProvider = container.querySelector('input[type="checkbox"]')
       expect(showProvider).not.toBeNull()
-      expect((showProvider as HTMLInputElement).checked).toBe(true)
+      expect((showProvider as HTMLInputElement).checked).toBe(false)
       await act(async () => { (showProvider as HTMLInputElement).click(); await Promise.resolve() })
-      expect(container.textContent).toContain('chat')
-      expect(container.textContent).not.toContain('deepseek / chat')
+      expect(container.textContent).toContain('deepseek / chat')
 
       const refresh = [...container.querySelectorAll('button')].find(button => button.textContent === 'refresh')
       expect(refresh).toBeDefined()
