@@ -397,10 +397,11 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
     input: total.input + event.input,
     output: total.output + event.output,
     cached: total.cached + event.cached,
+    cacheHit: total.cacheHit + event.cacheHit,
     unmetered: total.unmetered + (event.metered ? 0 : 1),
     failed: total.failed + (event.outcome === 'failure' || event.outcome === 'aborted' ? 1 : 0),
     retried: total.retried + (event.retried ? 1 : 0),
-  }), { requests: 0, input: 0, output: 0, cached: 0, unmetered: 0, failed: 0, retried: 0 }), [events])
+  }), { requests: 0, input: 0, output: 0, cached: 0, cacheHit: 0, unmetered: 0, failed: 0, retried: 0 }), [events])
   const curve = useMemo(() => curvePath(buckets), [buckets])
   const activeBucket = target === undefined ? undefined : buckets[target.index]
   const maxTokens = Math.max(1, ...buckets.map(bucket => bucket.input + bucket.output + bucket.cached))
@@ -478,7 +479,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
             <div className={css.metricRow}>
               <Metric label={t('inputTokens')} value={tokenText(totals.input)} />
               <Metric label={t('outputTokens')} value={tokenText(totals.output)} />
-              <Metric label={t('cachedTokens')} value={tokenText(totals.cached)} />
+              <Metric label={t('cachedTokens')} value={tokenText(totals.cacheHit)} />
             </div>
             <div className={css.metricRow}>
               <Metric label={t('unmeteredRequests')} value={exactCountText(totals.unmetered)} />
