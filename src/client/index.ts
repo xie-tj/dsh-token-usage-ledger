@@ -57,7 +57,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     const injected = (): UsageDashboardInjected => ({
       readSnapshot: async (): Promise<UsageLedgerSnapshot> => {
         const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
-        return unpackSnapshot(await ledger.snapshot({ days: 366, timeZone }))
+        return unpackSnapshot(await ledger.snapshot({ days: 30, timeZone }))
       },
     })
     const t = ctx.locale.bind(NS)

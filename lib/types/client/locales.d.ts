@@ -13,7 +13,6 @@ export declare const zh: {
     period: string;
     sevenDays: string;
     thirtyDays: string;
-    allTime: string;
     totalTokens: string;
     requests: string;
     inputTokens: string;
@@ -58,7 +57,6 @@ export declare const en: {
     period: string;
     sevenDays: string;
     thirtyDays: string;
-    allTime: string;
     totalTokens: string;
     requests: string;
     inputTokens: string;

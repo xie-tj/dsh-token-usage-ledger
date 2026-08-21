@@ -95,6 +95,7 @@ describe('Usage dashboard GUI', () => {
       expect(container.textContent).toContain(String(manyRequests))
       expect(container.textContent).toContain('10K')
       expect(container.textContent).not.toContain('1万')
+      expect(container.textContent).not.toContain('allTime')
       expect(container.querySelectorAll('select')).toHaveLength(2)
 
       const refresh = [...container.querySelectorAll('button')].find(button => button.textContent === 'refresh')

@@ -12,7 +12,7 @@ export function installUsageStyles(): () => void {
   return typeof styles.install === 'function' ? styles.install() : () => {}
 }
 
-type Period = '7d' | '30d' | 'all'
+type Period = '7d' | '30d'
 type ChartTarget = { readonly kind: 'requests' | 'tokens'; readonly index: number } | undefined
 
 interface UsageEvent {
@@ -240,7 +240,7 @@ function selectedEvents(
   throughDay: string | undefined,
 ): readonly UsageEvent[] {
   const byModel = model === 'all' ? events : events.filter(event => event.model === model)
-  if (period === 'all' || byModel.length === 0) return byModel
+  if (byModel.length === 0) return byModel
   const endDay = throughDay ?? [...byModel]
     .map(event => localDay(event.at))
     .filter((day): day is string => day !== undefined)
@@ -266,10 +266,7 @@ function bucketsOf(
     .filter(row => row.requests > 0 || row.input > 0 || row.output > 0 || row.cached > 0 || row.failed > 0)
     .map(row => row.date)
   const endDay = throughDay ?? [...(preferDaily ? dailyDays : eventDays)].sort().at(-1) ?? localDay(Date.now()) ?? '1970-01-01'
-  const dataDays = preferDaily ? dailyDays : eventDays
-  const startDay = period === 'all'
-    ? [...dataDays].sort().at(0) ?? endDay
-    : shiftDay(endDay, -(period === '7d' ? 6 : 29))
+  const startDay = shiftDay(endDay, -(period === '7d' ? 6 : 29))
   const days: string[] = []
   for (let day = startDay; day <= endDay; day = shiftDay(day, 1)) days.push(day)
   const buckets = days.map(date => ({ date, requests: 0, input: 0, output: 0, cached: 0, metered: 0, unmetered: 0, failed: 0, retried: 0 }))
@@ -433,7 +430,6 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
           <select value={period} onChange={(event) => { setPeriod(event.currentTarget.value as Period) }}>
             <option value="7d">{t('sevenDays')}</option>
             <option value="30d">{t('thirtyDays')}</option>
-            <option value="all">{t('allTime')}</option>
           </select>
         </label>
       </div>

@@ -16,7 +16,7 @@ dsh --profile web
 
 仓库包含可加载的 Host、Client 和 Typert `lib/` 产物，安装时不依赖 `prepare` 构建。若包管理器要求批准 Git dependency 的构建脚本，请按实际 profile 的 pnpm 配置处理；本包的预构建安装路径本身不需要执行源码构建。
 
-安装后打开 Settings → Usage。页面读取最近 366 个浏览器本地日历日的数据，并在浏览器内提供最近 7 天、30 天和 366 天筛选。
+安装后打开 Settings → Usage。页面读取最近 30 个浏览器本地日历日的数据，并在浏览器内提供最近 7 天和 30 天筛选。
 
 ## 从源码构建
 
@@ -68,7 +68,7 @@ interface UsageLedgerSnapshotRequest {
 - `days: 30`：截至请求当天的 30 个连续日历日；
 - `timeZone: "UTC"`：决定日期范围和按日分组。
 
-Client Usage 页面不使用这些默认天数：它显式请求 `{ days: 366, timeZone: <浏览器 IANA 时区> }`，再在本地执行模型和时间范围筛选。
+Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }`，再在本地执行模型和时间范围筛选。
 
 请求在 Remote 边界执行以下校验并抛出对应错误：
 
@@ -118,7 +118,6 @@ Client 注册 `settings.section`：ID 为 `usage`，顺序为 20，并提供中�
 
 ## Known Limitations and Deferred Work
 
-- Web 的“All time”实际是最近 366 天；Remote 也拒绝超过 366 天的请求。
 - Web 尚无 workspace 选择器；Remote 已支持精确 workspace 过滤。
 - Legacy session 可能显示 `unknown` route，且无法恢复源日志未记录的失败、abort、retry 或 token。
 - 页面合并展示 cache read/write，未分别绘图；也不显示价格或金额。
