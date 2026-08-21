@@ -48,10 +48,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/xie-tj/dsh-plugin-usage-ledger.git"
+    "url": "git+https://github.com/xie-tj/dsh-token-usage-ledger.git"
   },
   "bugs": {
-    "url": "https://github.com/xie-tj/dsh-plugin-usage-ledger/issues"
+    "url": "https://github.com/xie-tj/dsh-token-usage-ledger/issues"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"

@@ -16,8 +16,8 @@
 从 Git 安装到 Web profile；生产环境应将 Git spec 固定到 commit SHA：
 
 ```sh
-dsh plugin --profile web add github:xie-tj/dsh-plugin-usage-ledger
-# 例如：github:xie-tj/dsh-plugin-usage-ledger#<commit-sha>
+dsh plugin --profile web add github:xie-tj/dsh-token-usage-ledger
+# 例如：github:xie-tj/dsh-token-usage-ledger#<commit-sha>
 dsh --profile web
 ```
 
