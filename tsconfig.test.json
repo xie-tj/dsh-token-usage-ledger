@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "incremental": false,
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "files": ["src/css-modules.d.ts"],
+  "include": ["tests/**/*.ts", "tests/**/*.tsx"],
+  "exclude": ["tests/host.lifecycle.spec.ts"]
+}

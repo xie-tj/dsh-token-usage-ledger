@@ -1,8 +1,17 @@
 import { useEffect, useId, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import css from './UsageDashboard.module.css'
+import type { UsageLedgerSnapshot } from '../host/types.ts'
+import * as styles from './UsageDashboard.module.css'
 
-type JsonRecord = Record<string, unknown>
+const css = styles.default
+
+/** Install the dashboard stylesheet and return its disposer.
+ * @returns A function that removes the installed stylesheet.
+ */
+export function installUsageStyles(): () => void {
+  return typeof styles.install === 'function' ? styles.install() : () => {}
+}
+
 type Period = '7d' | '30d' | 'all'
 type ChartTarget = { readonly kind: 'requests' | 'tokens'; readonly index: number } | undefined
 
@@ -30,8 +39,8 @@ interface ModelRow {
 }
 
 interface UsageSnapshot {
-  readonly updatedAt: string | undefined
-  readonly throughDay: string | undefined
+  readonly updatedAt: string
+  readonly throughDay: string
   readonly events: readonly UsageEvent[]
   readonly models: readonly ModelRow[]
   readonly daily: readonly Bucket[]
@@ -52,7 +61,7 @@ interface Bucket {
 /** Dependencies supplied from the Usage plugin's apply closure. */
 export interface UsageDashboardInjected {
   /** Read the current Host usage snapshot. */
-  readSnapshot: () => Promise<unknown>
+  readSnapshot: () => Promise<UsageLedgerSnapshot>
 }
 
 /** Data and translation props consumed by the Usage dashboard in any Settings slot. */
@@ -63,42 +72,10 @@ type SnapshotState =
   | { readonly status: 'ready'; readonly snapshot: UsageSnapshot; readonly error: undefined }
   | { readonly status: 'error'; readonly snapshot: UsageSnapshot | undefined; readonly error: string }
 
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null
-}
-
-function textOf(record: JsonRecord, keys: readonly string[]): string | undefined {
-  for (const key of keys) {
-    const value = record[key]
-    if (typeof value === 'string' && value.length > 0) return value
-  }
-  return undefined
-}
-
-function countOf(record: JsonRecord, keys: readonly string[]): number {
-  for (const key of keys) {
-    const value = record[key]
-    if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, value)
-  }
-  return 0
-}
-
-function recordsOf(record: JsonRecord, keys: readonly string[]): readonly JsonRecord[] {
-  for (const key of keys) {
-    const value = record[key]
-    if (Array.isArray(value)) return value.filter(isRecord)
-  }
-  return []
-}
-
-function dateOf(record: JsonRecord): number {
-  const value = record.timestamp ?? record.at ?? record.createdAt ?? record.time
-  if (typeof value === 'number' && Number.isFinite(value)) return value > 1_000_000_000_000 ? value : value * 1_000
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value)
-    if (!Number.isNaN(parsed)) return parsed
-  }
-  return 0
+function shiftDay(day: string, offset: number): string {
+  const date = new Date(`${day}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() + offset)
+  return date.toISOString().slice(0, 10)
 }
 
 function localDay(time: number): string | undefined {
@@ -112,77 +89,6 @@ function localDay(time: number): string | undefined {
   const month = parts.find(part => part.type === 'month')?.value
   const day = parts.find(part => part.type === 'day')?.value
   return year === undefined || month === undefined || day === undefined ? undefined : `${year}-${month}-${day}`
-}
-
-function shiftDay(day: string, offset: number): string {
-  const date = new Date(`${day}T00:00:00.000Z`)
-  date.setUTCDate(date.getUTCDate() + offset)
-  return date.toISOString().slice(0, 10)
-}
-
-function dailyOf(record: JsonRecord): readonly Bucket[] {
-  return recordsOf(record, ['daily']).flatMap((row) => {
-    const day = textOf(row, ['day', 'date'])
-    if (day === undefined) return []
-    return [{
-      date: day,
-      requests: countOf(row, ['requests', 'requestCount', 'count']),
-      input: countOf(row, ['inputTokens', 'input', 'promptTokens', 'prompt']),
-      output: countOf(row, ['outputTokens', 'output', 'completionTokens', 'completion']),
-      cached: countOf(row, ['cacheReadTokens', 'cachedTokens', 'cached'])
-        + countOf(row, ['cacheWriteTokens', 'cacheWrite']),
-      metered: countOf(row, ['meteredRequests', 'metered']),
-      unmetered: countOf(row, ['unmeteredRequests', 'unmetered']),
-      failed: countOf(row, ['failedRequests', 'failures', 'failed']),
-      retried: countOf(row, ['retryRequests', 'retries', 'retried']),
-    }]
-  })
-}
-
-function eventOf(record: JsonRecord): UsageEvent {
-  const input = countOf(record, ['inputTokens', 'input', 'promptTokens', 'prompt'])
-  const output = countOf(record, ['outputTokens', 'output', 'completionTokens', 'completion'])
-  const cacheRead = countOf(record, ['cacheReadTokens', 'cachedTokens', 'cached'])
-  const cacheWrite = countOf(record, ['cacheWriteTokens', 'cacheWrite'])
-  const provider = textOf(record, ['provider', 'providerId'])
-  const model = textOf(record, ['model', 'modelId', 'modelName']) ?? 'Unknown model'
-  const rawOutcome = textOf(record, ['outcome', 'status'])
-  const outcome = rawOutcome === 'failure' || rawOutcome === 'failed'
-    ? 'failure'
-    : rawOutcome === 'aborted' || rawOutcome === 'abort'
-      ? 'aborted'
-      : rawOutcome === 'started' || rawOutcome === 'pending'
-        ? 'started'
-        : 'success'
-  return {
-    at: dateOf(record),
-    model: provider === undefined ? model : `${provider} / ${model}`,
-    input,
-    output,
-    cached: cacheRead + cacheWrite,
-    metered: 'meteredRequests' in record || 'metered' in record
-      ? countOf(record, ['meteredRequests', 'metered']) > 0
-      : ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens'].some(key => key in record),
-    outcome,
-    retried: record.retried === true || countOf(record, ['retryRequests', 'retries', 'retried']) > 0,
-  }
-}
-
-function modelOf(record: JsonRecord): ModelRow {
-  const provider = textOf(record, ['provider', 'providerId'])
-  const model = textOf(record, ['model', 'modelId', 'name']) ?? 'Unknown model'
-  return {
-    model: provider === undefined ? model : `${provider} / ${model}`,
-    requests: countOf(record, ['requests', 'requestCount', 'count']),
-    input: countOf(record, ['inputTokens', 'input', 'promptTokens', 'prompt']),
-    output: countOf(record, ['outputTokens', 'output', 'completionTokens', 'completion']),
-    cached: countOf(record, ['cacheReadTokens', 'cachedTokens', 'cached'])
-      + countOf(record, ['cacheWriteTokens', 'cacheWrite']),
-    metered: countOf(record, ['meteredRequests', 'metered']),
-    unmetered: countOf(record, ['unmeteredRequests', 'unmetered']),
-    failed: countOf(record, ['failedRequests', 'failures', 'failed']),
-    retried: countOf(record, ['retryRequests', 'retries', 'retried']),
-  }
 }
 
 function mergeModelRows(rows: readonly ModelRow[]): readonly ModelRow[] {
@@ -237,26 +143,55 @@ function aggregateModels(events: readonly UsageEvent[]): readonly ModelRow[] {
   return [...rows.values()]
 }
 
-/** Normalize additive usage-ledger records without requiring a version-specific payload wrapper. */
-function normalizeSnapshot(value: unknown): UsageSnapshot {
-  const record = isRecord(value) ? value : {}
-  const daily = dailyOf(record)
-  let events = recordsOf(record, ['events', 'requests', 'entries', 'points']).map(eventOf)
-  if (events.length === 0) {
-    events = daily
-      .filter(row => row.requests > 0 || row.input > 0 || row.output > 0 || row.cached > 0)
-      .map(row => eventOf({
-        ...row,
-        at: Date.parse(`${row.date}T12:00:00`),
-        model: 'All models',
-      }))
-  }
-  const suppliedModels = recordsOf(record, ['models', 'byModel']).map(modelOf)
+/**
+ * Project the strict Host snapshot into the dashboard's display vocabulary.
+ * @param snapshot - validated Host snapshot.
+ * @returns normalized values used by charts and model rows.
+ */
+export function projectSnapshot(snapshot: UsageLedgerSnapshot): UsageSnapshot {
+  const events = snapshot.events.map(event => {
+    const hasUsage = event.inputTokens !== undefined
+      || event.outputTokens !== undefined
+      || event.cacheReadTokens !== undefined
+      || event.cacheWriteTokens !== undefined
+    return {
+      at: event.at,
+      model: `${event.provider} / ${event.model}`,
+      input: event.inputTokens ?? 0,
+      output: event.outputTokens ?? 0,
+      cached: (event.cacheReadTokens ?? 0) + (event.cacheWriteTokens ?? 0),
+      metered: hasUsage,
+      outcome: event.outcome,
+      retried: event.retried,
+    }
+  })
+  const models = mergeModelRows(snapshot.models.map(row => ({
+    model: `${row.provider} / ${row.model}`,
+    requests: row.requests,
+    input: row.inputTokens,
+    output: row.outputTokens,
+    cached: row.cacheReadTokens + row.cacheWriteTokens,
+    metered: row.meteredRequests,
+    unmetered: row.unmeteredRequests,
+    failed: row.failedRequests,
+    retried: row.retryRequests,
+  })))
+  const daily = snapshot.daily.map(row => ({
+    date: row.day,
+    requests: row.requests,
+    input: row.inputTokens,
+    output: row.outputTokens,
+    cached: row.cacheReadTokens + row.cacheWriteTokens,
+    metered: row.meteredRequests,
+    unmetered: row.unmeteredRequests,
+    failed: row.failedRequests,
+    retried: row.retryRequests,
+  }))
   return {
-    updatedAt: textOf(record, ['updatedAt', 'generatedAt', 'asOf']),
-    throughDay: textOf(record, ['throughDay', 'toDay', 'endDay']),
+    updatedAt: snapshot.updatedAt,
+    throughDay: snapshot.throughDay,
     events,
-    models: suppliedModels.length > 0 ? mergeModelRows(suppliedModels) : aggregateModels(events),
+    models,
     daily,
   }
 }
@@ -383,7 +318,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
     let current = true
     setState(previous => ({ status: 'loading', snapshot: previous.snapshot, error: undefined }))
     void readSnapshot().then(
-      (snapshot) => { if (current) setState({ status: 'ready', snapshot: normalizeSnapshot(snapshot), error: undefined }) },
+      (snapshot) => { if (current) setState({ status: 'ready', snapshot: projectSnapshot(snapshot), error: undefined }) },
       (error: unknown) => {
         if (!current) return
         setState(previous => ({
@@ -463,7 +398,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
       {state.status === 'error' ? (
         <p className={css.stale} role="status">{t('showingLastGood')}</p>
       ) : null}
-      {snapshot.updatedAt === undefined ? null : <p className={css.updated}>{interpolate(t('updated'), { time: snapshot.updatedAt })}</p>}
+      <p className={css.updated}>{interpolate(t('updated'), { time: snapshot.updatedAt })}</p>
 
       <div className={css.filters}>
         <label>

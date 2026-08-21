@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-usage-ledger",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Persistent model usage ledger and Web Usage dashboard for DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",
@@ -10,7 +10,10 @@
       "types": "./lib/types/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./client": "./lib/client.js",
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
     "./invariant": {
       "types": "./lib/types/invariant.d.ts",
       "default": "./lib/invariant.js"
@@ -34,7 +37,6 @@
     "lib/index.js",
     "lib/invariant.js",
     "lib/client.js",
-    "lib/client.js.map",
     "lib/typert.host.js",
     "lib/typert.host.d.ts",
     "lib/typert.remote-client.js",
@@ -63,25 +65,72 @@
         "@deepseek-ai/dsh-api-remotes",
         "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-settings",
-        "@deepseek-ai/dsh-client-ui-settings-plugins",
         "@deepseek-ai/dsh-client-locale"
       ]
     }
   },
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "typecheck:host": "tsc -b tsconfig.host.json && node scripts/normalize-declarations.mjs",
+    "typecheck:client": "tsc -b tsconfig.client.json && node scripts/normalize-declarations.mjs",
+    "typecheck": "pnpm run typecheck:host && pnpm run typecheck:client",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit && tsc -p tsconfig.test.host.json --noEmit",
+    "bundle:host": "tsdown --env.DSH_BUILD_FACE host",
+    "generate:typert": "node scripts/generate-typert.mjs",
+    "bundle:client": "tsdown --env.DSH_BUILD_FACE client && node scripts/normalize-client.mjs",
+    "build": "pnpm run clean && pnpm run typecheck:host && pnpm run bundle:host && pnpm run generate:typert && pnpm run typecheck:client && pnpm run bundle:client",
+    "test": "pnpm run build && pnpm run typecheck:test && vitest run",
+    "pack:check": "node scripts/check-pack.mjs"
+  },
   "dependencies": {
-    "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/schemastery": "3.18.1",
-    "@deepseek-ai/dsh-attachment": "0.1.0-rc.8",
+    "zod": "4.4.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
     "@deepseek-ai/dsh-brand": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-api-remotes": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-locale": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.0-rc.8",
     "@deepseek-ai/dsh-invariants": "0.1.0-rc.8",
     "@deepseek-ai/dsh-llm": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-timeout": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-scope": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm-retry": "0.1.0-rc.8",
     "@deepseek-ai/dsh-session": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-persistence": "0.1.0-rc.8",
     "@deepseek-ai/dsh-settings": "0.1.0-rc.8",
-    "@deepseek-ai/dsh-storage": "0.1.0-rc.8",
     "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.8",
     "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.8",
-    "zod": "^4.4.3"
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-api-remotes": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-brand": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-locale": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-invariants": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm-retry": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-persistence": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-typert-generator": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.8",
+    "@types/node": "^22.15.0",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.7",
+    "js-yaml": "^5.3.0",
+    "jsdom": "^26.1.0",
+    "lightningcss": "1.33.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.3.1",
+    "tsdown": "0.22.2",
+    "typescript": "6.0.3",
+    "vitest": "3.2.4"
   }
 }

@@ -3,6 +3,8 @@
 import { domainTable, defineDomain } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import { createUsageAttemptId } from './event-types.ts'
+import type { UsageAttemptId } from './event-types.ts'
 
 /** Final status known for one provider request attempt. */
 export type UsageLedgerAttemptOutcome = 'success' | 'failure' | 'aborted'
@@ -16,9 +18,9 @@ export interface UsageLedgerSessionRow {
   /** Last append sequence the ledger observed. */
   readonly observedSeq: number
   /** Open attempt id by `turn:step`. */
-  readonly activeAttempts: Readonly<Record<string, string>>
+  readonly activeAttempts: Readonly<Record<string, UsageAttemptId>>
   /** Most recent successful attempt id by `turn:step`. */
-  readonly successfulAttempts: Readonly<Record<string, string>>
+  readonly successfulAttempts: Readonly<Record<string, UsageAttemptId>>
 }
 
 /** One independently idempotent provider call, including provisional and final metering. */
@@ -32,7 +34,7 @@ export interface UsageLedgerCallRow {
   /** UTC date on which the attempt started. */
   readonly day: string
   /** Durable request attempt id. */
-  readonly attemptId: string
+  readonly attemptId: UsageAttemptId
   /** Owning turn number. */
   readonly turn: number
   /** Owning step number. */
@@ -72,14 +74,15 @@ const tokenUsageSchema = z.object({
   cacheReadTokens: nonNegativeInteger,
   cacheWriteTokens: nonNegativeInteger,
 })
+const attemptIdSchema = z.string().transform(createUsageAttemptId)
 
 /** Zod schema for the lifecycle cursor and attempt lookup tables. */
 export const usageLedgerSessionRowSchema = z.object({
   createdAt: nonNegativeInteger,
   workspace: z.string().optional(),
   observedSeq: z.number().int().min(-1),
-  activeAttempts: z.record(z.string(), z.string()),
-  successfulAttempts: z.record(z.string(), z.string()),
+  activeAttempts: z.record(z.string(), attemptIdSchema),
+  successfulAttempts: z.record(z.string(), attemptIdSchema),
 })
 
 /** Zod schema for one persisted provider attempt. */
@@ -88,7 +91,7 @@ export const usageLedgerCallRowSchema = z.object({
   createdAt: nonNegativeInteger,
   workspace: z.string().optional(),
   day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  attemptId: z.string(),
+  attemptId: attemptIdSchema,
   startedAt: nonNegativeInteger,
   turn: nonNegativeInteger,
   step: nonNegativeInteger,

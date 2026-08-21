@@ -8,7 +8,7 @@ import z from '@deepseek-ai/schemastery'
 import { settingsNamespace } from '@deepseek-ai/dsh-settings'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-llm-retry'
-import { Session, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
@@ -25,6 +25,8 @@ import type {
   UsageLedgerSnapshot,
   UsageLedgerSnapshotRequest,
 } from './types.ts'
+import { createUsageAttemptId } from './event-types.ts'
+import type { UsageAttemptId, UsageSessionEvent } from './event-types.ts'
 
 export type * from './types.ts'
 export {
@@ -32,6 +34,7 @@ export {
   usageLedgerDomainSpec,
   usageLedgerSessionRowSchema,
 } from './spec.ts'
+export type { UsageAttemptId } from './event-types.ts'
 export type {
   UsageLedgerAttemptOutcome,
   UsageLedgerCallRow,
@@ -125,7 +128,7 @@ function resolveSnapshotRequest(request: UsageLedgerSnapshotRequest | undefined)
 }
 
 /** Stable storage key for one attempt in one exact session lifecycle. */
-function callKey(session: Session, attemptId: string): string {
+function callKey(session: Session, attemptId: UsageAttemptId): string {
   return JSON.stringify([session.id, session.header.createdAt, attemptId])
 }
 
@@ -157,8 +160,8 @@ function usageFor(row: UsageLedgerCallRow): UsageLedgerTokenUsage | undefined {
 }
 
 /** Stable synthetic attempt id for a historical log without request-attempt events. */
-function legacyAttemptId(turn: number, step: number): string {
-  return `legacy:${turn}:${step}`
+function legacyAttemptId(turn: number, step: number): UsageAttemptId {
+  return createUsageAttemptId(`legacy:${turn}:${step}`)
 }
 
 type UsageRoute = { provider: string; model: string }
@@ -174,7 +177,7 @@ function routeBefore(session: Session, throughSeq: number): UsageRoute {
 }
 
 /** Advance a historical provider/model route when a request event records one. */
-function routeAfter(route: UsageRoute, event: SessionEvent): UsageRoute {
+function routeAfter(route: UsageRoute, event: UsageSessionEvent): UsageRoute {
   if (event.type === 'request/header') return {
     provider: event.data.header.config.provider,
     model: event.data.header.config.model,
@@ -412,7 +415,7 @@ export class UsageLedgerService extends TypertRemoteService {
   private async processEvent(
     session: Session,
     current: UsageLedgerSessionRow,
-    event: SessionEvent,
+    event: UsageSessionEvent,
     route: UsageRoute,
   ): Promise<UsageLedgerSessionRow> {
     switch (event.type) {
@@ -435,7 +438,7 @@ export class UsageLedgerService extends TypertRemoteService {
   private async processAssistantMessage(
     session: Session,
     current: UsageLedgerSessionRow,
-    event: Extract<SessionEvent, { type: 'assistant/message' }>,
+    event: Extract<UsageSessionEvent, { type: 'assistant/message' }>,
     route: UsageRoute,
   ): Promise<UsageLedgerSessionRow> {
     const stepId = stepKey(event.data.turn, event.data.step)
@@ -478,7 +481,7 @@ export class UsageLedgerService extends TypertRemoteService {
   private async processAttempt(
     session: Session,
     current: UsageLedgerSessionRow,
-    event: Extract<SessionEvent, { type: 'llm/request-attempt' }>,
+    event: Extract<UsageSessionEvent, { type: 'llm/request-attempt' }>,
   ): Promise<UsageLedgerSessionRow> {
     const { attemptId, turn, step } = event.data
     const key = callKey(session, attemptId)

@@ -1,11 +1,12 @@
-# Adds the Host ledger and its Web client to a profile.
-# The storage-domain row is restated because a patch replaces its full config.
-- id: storage-domain
-  name: '@deepseek-ai/dsh-storage-domain'
-  config:
-    backend: json
-    routes:
-      usage_ledger: sqlite
+# Disable the built-in Usage rows when this bundle is layered onto the stock Web profile.
+# The target rows are optional: profiles without them simply receive this bundle.
+- id: usage-ledger
+  name: '@deepseek-ai/dsh-usage-ledger'
+  disabled: true
+
+- id: ui-settings-usage
+  name: '@deepseek-ai/dsh-client-ui-settings-usage'
+  disabled: true
 
 - insert:
     - id: usage-ledger-plugin

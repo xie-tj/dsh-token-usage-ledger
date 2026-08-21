@@ -1,6 +1,7 @@
 /** Persistent `usage_ledger` domain declaration and stored-record schemas. */
 import { z } from 'zod';
 import type { SessionId } from '@deepseek-ai/dsh-session';
+import type { UsageAttemptId } from './event-types.js';
 /** Final status known for one provider request attempt. */
 export type UsageLedgerAttemptOutcome = 'success' | 'failure' | 'aborted';
 /** Lifecycle cursor plus attempt lookups required while replaying one session. */
@@ -12,9 +13,9 @@ export interface UsageLedgerSessionRow {
     /** Last append sequence the ledger observed. */
     readonly observedSeq: number;
     /** Open attempt id by `turn:step`. */
-    readonly activeAttempts: Readonly<Record<string, string>>;
+    readonly activeAttempts: Readonly<Record<string, UsageAttemptId>>;
     /** Most recent successful attempt id by `turn:step`. */
-    readonly successfulAttempts: Readonly<Record<string, string>>;
+    readonly successfulAttempts: Readonly<Record<string, UsageAttemptId>>;
 }
 /** One independently idempotent provider call, including provisional and final metering. */
 export interface UsageLedgerCallRow {
@@ -27,7 +28,7 @@ export interface UsageLedgerCallRow {
     /** UTC date on which the attempt started. */
     readonly day: string;
     /** Durable request attempt id. */
-    readonly attemptId: string;
+    readonly attemptId: UsageAttemptId;
     /** Owning turn number. */
     readonly turn: number;
     /** Owning step number. */
@@ -63,8 +64,8 @@ export declare const usageLedgerSessionRowSchema: z.ZodObject<{
     createdAt: z.ZodNumber;
     workspace: z.ZodOptional<z.ZodString>;
     observedSeq: z.ZodNumber;
-    activeAttempts: z.ZodRecord<z.ZodString, z.ZodString>;
-    successfulAttempts: z.ZodRecord<z.ZodString, z.ZodString>;
+    activeAttempts: z.ZodRecord<z.ZodString, z.ZodPipe<z.ZodString, z.ZodTransform<UsageAttemptId, string>>>;
+    successfulAttempts: z.ZodRecord<z.ZodString, z.ZodPipe<z.ZodString, z.ZodTransform<UsageAttemptId, string>>>;
 }, z.core.$strip>;
 /** Zod schema for one persisted provider attempt. */
 export declare const usageLedgerCallRowSchema: z.ZodObject<{
@@ -72,7 +73,7 @@ export declare const usageLedgerCallRowSchema: z.ZodObject<{
     createdAt: z.ZodNumber;
     workspace: z.ZodOptional<z.ZodString>;
     day: z.ZodString;
-    attemptId: z.ZodString;
+    attemptId: z.ZodPipe<z.ZodString, z.ZodTransform<UsageAttemptId, string>>;
     startedAt: z.ZodNumber;
     turn: z.ZodNumber;
     step: z.ZodNumber;
@@ -106,4 +107,3 @@ export declare const usageLedgerDomainSpec: {
         calls: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, UsageLedgerCallRow>;
     };
 };
-//# sourceMappingURL=spec.d.ts.map
