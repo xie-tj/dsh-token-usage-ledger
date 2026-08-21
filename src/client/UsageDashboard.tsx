@@ -541,9 +541,9 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
             <div className={css.chartHeading}><h3>{t('modelBreakdown')}</h3><span>{visibleModels.length}</span></div>
             <div className={css.tableScroll}>
               <table>
-                <thead><tr><th>{t('tableModel')}</th><th>{t('tableRequests')}</th><th>{t('tableFailed')}</th><th>{t('tableRetries')}</th><th>{t('tableInput')}</th><th>{t('tableOutput')}</th><th>{t('tableCacheHit')}</th><th>{t('tableTotal')}</th></tr></thead>
+                <thead><tr><th>{t('tableModel')}</th><th>{t('tableInput')}</th><th>{t('tableOutput')}</th><th>{t('tableCacheHit')}</th><th>{t('tableTotal')}</th><th>{t('tableRequests')}</th><th>{t('tableFailed')}</th><th>{t('tableRetries')}</th></tr></thead>
                 <tbody>{visibleModels.filter(row => model === 'all' || row.model === model).map(row => (
-                  <tr key={row.model}><th scope="row">{row.model}</th><td>{compactNumberText(row.requests)}</td><td>{compactNumberText(row.failed)}</td><td>{compactNumberText(row.retried)}</td><td>{compactNumberText(row.input)}</td><td>{compactNumberText(row.output)}</td><td>{compactNumberText(row.cacheHit)}</td><td>{compactNumberText(totalOf(row))}</td></tr>
+                  <tr key={row.model}><th scope="row">{row.model}</th><td>{compactNumberText(row.input)}</td><td>{compactNumberText(row.output)}</td><td>{compactNumberText(row.cacheHit)}</td><td>{compactNumberText(totalOf(row))}</td><td>{compactNumberText(row.requests)}</td><td>{compactNumberText(row.failed)}</td><td>{compactNumberText(row.retried)}</td></tr>
                 ))}</tbody>
               </table>
             </div>

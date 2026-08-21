@@ -92,6 +92,9 @@ describe('Usage dashboard GUI', () => {
       expect(container.textContent).toContain('modelBreakdown')
       expect(container.textContent).toContain('tableCacheHit')
       expect(container.textContent).toContain('13')
+      expect([...container.querySelectorAll('thead th')].map(header => header.textContent)).toEqual([
+        'tableModel', 'tableInput', 'tableOutput', 'tableCacheHit', 'tableTotal', 'tableRequests', 'tableFailed', 'tableRetries',
+      ])
       expect(container.textContent).toContain(String(manyRequests))
       expect(container.textContent).toContain('10K')
       expect(container.textContent).not.toContain('1万')
