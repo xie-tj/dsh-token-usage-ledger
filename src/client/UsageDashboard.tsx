@@ -215,6 +215,15 @@ function fullNumberText(value: number): string {
   return new Intl.NumberFormat().format(value)
 }
 
+function compactNumberText(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    compactDisplay: 'short',
+    maximumFractionDigits: 2,
+    notation: 'compact',
+    useGrouping: false,
+  }).format(value)
+}
+
 function dateText(value: string): string {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date(value)
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
@@ -538,7 +547,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
               <table>
                 <thead><tr><th>{t('tableModel')}</th><th>{t('tableRequests')}</th><th>{t('tableFailed')}</th><th>{t('tableRetries')}</th><th>{t('tableInput')}</th><th>{t('tableOutput')}</th><th>{t('tableCacheHit')}</th><th>{t('tableTotal')}</th></tr></thead>
                 <tbody>{visibleModels.filter(row => model === 'all' || row.model === model).map(row => (
-                  <tr key={row.model}><th scope="row">{row.model}</th><td>{exactCountText(row.requests)}</td><td>{exactCountText(row.failed)}</td><td>{exactCountText(row.retried)}</td><td>{tokenText(row.input)}</td><td>{tokenText(row.output)}</td><td>{tokenText(row.cacheHit)}</td><td>{tokenText(totalOf(row))}</td></tr>
+                  <tr key={row.model}><th scope="row">{row.model}</th><td>{compactNumberText(row.requests)}</td><td>{compactNumberText(row.failed)}</td><td>{compactNumberText(row.retried)}</td><td>{compactNumberText(row.input)}</td><td>{compactNumberText(row.output)}</td><td>{compactNumberText(row.cacheHit)}</td><td>{compactNumberText(totalOf(row))}</td></tr>
                 ))}</tbody>
               </table>
             </div>
