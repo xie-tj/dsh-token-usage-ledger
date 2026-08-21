@@ -344,9 +344,8 @@
 }
 
 .tableScroll table {
-  width: 100%;
-  min-width: 0;
-  table-layout: fixed;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 12px;
   line-height: 18px;
@@ -358,6 +357,7 @@
   border-top: 1px solid var(--dsw-alias-border-l2);
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .tableScroll thead th {
@@ -365,44 +365,10 @@
   color: var(--dsw-alias-label-tertiary);
   font-size: 11px;
   font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .tableScroll th:first-child {
-  width: 30%;
-  max-width: none;
-  overflow: hidden;
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tableScroll thead th:nth-child(2),
-.tableScroll tbody td:nth-child(2),
-.tableScroll thead th:nth-child(3),
-.tableScroll tbody td:nth-child(3),
-.tableScroll thead th:nth-child(5),
-.tableScroll tbody td:nth-child(5) {
-  width: 10%;
-}
-
-.tableScroll thead th:nth-child(4),
-.tableScroll tbody td:nth-child(4) {
-  width: 15%;
-}
-
-.tableScroll thead th:nth-child(6),
-.tableScroll tbody td:nth-child(6) {
-  width: 9%;
-}
-
-.tableScroll thead th:nth-child(7),
-.tableScroll tbody td:nth-child(7),
-.tableScroll thead th:nth-child(8),
-.tableScroll tbody td:nth-child(8) {
-  width: 8%;
 }
 
 .tableScroll tbody th {
