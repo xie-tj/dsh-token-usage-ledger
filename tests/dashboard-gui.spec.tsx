@@ -62,12 +62,23 @@ const snapshot: UsageLedgerSnapshot = {
   }],
 }
 
+const manyRequests = 10_001
+const highVolumeSnapshot: UsageLedgerSnapshot = {
+  ...snapshot,
+  events: Array.from({ length: manyRequests }, (_, index) => ({
+    ...snapshot.events[0],
+    at: snapshot.events[0].at + index,
+  })),
+  models: snapshot.models.map(row => ({ ...row, requests: manyRequests, successfulRequests: manyRequests })),
+  daily: snapshot.daily.map(row => ({ ...row, requests: manyRequests, successfulRequests: manyRequests })),
+}
+
 describe('Usage dashboard GUI', () => {
   it('renders model data and refreshes through the visible controls', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
-    const readSnapshot = vi.fn(async () => snapshot)
+    const readSnapshot = vi.fn(async () => highVolumeSnapshot)
     const translate = (key: string) => key
 
     try {
@@ -79,6 +90,7 @@ describe('Usage dashboard GUI', () => {
       expect(readSnapshot).toHaveBeenCalledOnce()
       expect(container.textContent).toContain('deepseek / chat')
       expect(container.textContent).toContain('modelBreakdown')
+      expect(container.textContent).toContain(new Intl.NumberFormat().format(manyRequests))
       expect(container.querySelectorAll('select')).toHaveLength(2)
 
       const refresh = [...container.querySelectorAll('button')].find(button => button.textContent === 'refresh')

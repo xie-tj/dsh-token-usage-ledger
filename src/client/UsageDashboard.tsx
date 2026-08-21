@@ -196,10 +196,6 @@ export function projectSnapshot(snapshot: UsageLedgerSnapshot): UsageSnapshot {
   }
 }
 
-function numberText(value: number): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0, notation: value >= 10_000 ? 'compact' : 'standard' }).format(value)
-}
-
 function fullNumberText(value: number): string {
   return new Intl.NumberFormat().format(value)
 }
@@ -422,17 +418,17 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
         <>
           <div className={css.metrics}>
             <Metric className={css.metricTotal} label={t('totalTokens')} value={tokenText(totals.input + totals.output + totals.cached)} />
-            <Metric label={t('requests')} value={numberText(totals.requests)} />
+            <Metric label={t('requests')} value={fullNumberText(totals.requests)} />
             <Metric label={t('inputTokens')} value={tokenText(totals.input)} />
             <Metric label={t('outputTokens')} value={tokenText(totals.output)} />
-            <Metric label={t('unmeteredRequests')} value={numberText(totals.unmetered)} />
-            <Metric label={t('failedRequests')} value={numberText(totals.failed)} />
-            <Metric label={t('retryRequests')} value={numberText(totals.retried)} />
+            <Metric label={t('unmeteredRequests')} value={fullNumberText(totals.unmetered)} />
+            <Metric label={t('failedRequests')} value={fullNumberText(totals.failed)} />
+            <Metric label={t('retryRequests')} value={fullNumberText(totals.retried)} />
           </div>
 
           <div className={css.charts}>
             <article className={css.chartCard}>
-              <div className={css.chartHeading}><h3>{t('requestCurve')}</h3><span>{numberText(totals.requests)}</span></div>
+              <div className={css.chartHeading}><h3>{t('requestCurve')}</h3><span>{fullNumberText(totals.requests)}</span></div>
               <div className={css.curveChart}>
                 <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
                   <path className={css.gridLine} d="M 0 36 H 100" />
@@ -527,7 +523,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
               <table>
                 <thead><tr><th>{t('tableModel')}</th><th>{t('tableRequests')}</th><th>{t('tableFailed')}</th><th>{t('tableRetries')}</th><th>{t('tableInput')}</th><th>{t('tableOutput')}</th><th>{t('tableTotal')}</th></tr></thead>
                 <tbody>{visibleModels.filter(row => model === 'all' || row.model === model).map(row => (
-                  <tr key={row.model}><th scope="row">{row.model}</th><td>{numberText(row.requests)}</td><td>{numberText(row.failed)}</td><td>{numberText(row.retried)}</td><td>{tokenText(row.input)}</td><td>{tokenText(row.output)}</td><td>{tokenText(totalOf(row))}</td></tr>
+                  <tr key={row.model}><th scope="row">{row.model}</th><td>{fullNumberText(row.requests)}</td><td>{fullNumberText(row.failed)}</td><td>{fullNumberText(row.retried)}</td><td>{tokenText(row.input)}</td><td>{tokenText(row.output)}</td><td>{tokenText(totalOf(row))}</td></tr>
                 ))}</tbody>
               </table>
             </div>
