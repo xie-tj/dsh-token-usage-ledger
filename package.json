@@ -33,6 +33,7 @@
     "./package.json": "./package.json"
   },
   "files": [
+    "assets/usage-demo.mp4",
     "cordis.patch.yml",
     "lib/index.js",
     "lib/invariant.js",

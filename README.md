@@ -1,6 +1,13 @@
 # dsh Usage Ledger Plugin
 
-`dsh-plugin-usage-ledger` 是面向 DeepSeek Harness Web profile 的 bundle。它把模型请求尝试和 provider 报告的 token 用量持久化到独立账本，从 session 历史补录数据，并在 Settings 中提供 Usage 页面。
+`dsh-plugin-usage-ledger` 为 DeepSeek Harness Web profile 提供持久化用量账本和可视化 Usage 仪表盘。它记录每次 provider dispatch（包括失败与重试），保存输入、输出和缓存 token，用 session 历史回填数据，并在 Settings → Usage 中按提供方、模型和时间范围查看用量。
+
+核心能力：
+
+- 独立持久化账本：重启后保留历史，并对已有 session 执行 best-effort 回填；
+- 精确统计：曲线、柱状图和 API 请求次数保留精确值，模型明细使用 K/M/B/T 紧凑单位；
+- 灵活筛选：支持提供方、模型和最近 7 天／30 天筛选，模型明细默认按具体模型聚合；
+- 缓存可见：单独展示缓存命中 token，并保留失败、未计量和重试请求。
 
 当前版本按 `@deepseek-ai/dsh` `0.1.0-rc.8` 依赖线构建，要求 Node.js `^22.19.0 || >=24.0.0`。
 
@@ -17,6 +24,14 @@ dsh --profile web
 仓库包含可加载的 Host、Client 和 Typert `lib/` 产物，安装时不依赖 `prepare` 构建。若包管理器要求批准 Git dependency 的构建脚本，请按实际 profile 的 pnpm 配置处理；本包的预构建安装路径本身不需要执行源码构建。
 
 安装后打开 Settings → Usage。页面读取最近 30 个浏览器本地日历日的数据，并按提供方、模型和最近 7 天或 30 天筛选；模型明细默认隐藏提供方并按具体模型聚合，也可以开启提供方显示。
+
+## 用量页面预览
+
+<video src="./assets/usage-demo.mp4" controls muted playsinline width="100%">
+  <a href="./assets/usage-demo.mp4">下载用量页面演示视频</a>
+</video>
+
+视频展示了 Settings → Usage 中的筛选、指标卡、图表和模型统计明细。
 
 ## 从源码构建
 

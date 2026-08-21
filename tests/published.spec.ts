@@ -42,6 +42,7 @@ describe('published package', () => {
     const [result] = JSON.parse(output) as PackResult[]
 
     expect(result.files.map(file => file.path).sort()).toEqual([
+      'assets/usage-demo.mp4',
       'LICENSE',
       'README.md',
       'cordis.patch.yml',
