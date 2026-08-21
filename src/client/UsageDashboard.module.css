@@ -245,7 +245,7 @@
 .curvePoint {
   fill: var(--dsw-alias-bg-layer-3);
   stroke: var(--dsw-alias-state-business-primary);
-  stroke-width: 0.7;
+  stroke-width: 0.5;
   vector-effect: non-scaling-stroke;
 }
 

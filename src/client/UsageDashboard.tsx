@@ -445,7 +445,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
                     const max = Math.max(1, ...buckets.map(candidate => candidate.requests))
                     const x = buckets.length === 1 ? 50 : (index / (buckets.length - 1)) * 100
                     const y = 36 - (bucket.requests / max) * 30
-                    return <circle key={bucket.date} className={css.curvePoint} cx={x} cy={y} r="1.3" />
+                    return <circle key={bucket.date} className={css.curvePoint} cx={x} cy={y} r="0.75" />
                   })}
                 </svg>
                 <div
