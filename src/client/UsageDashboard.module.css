@@ -180,11 +180,6 @@
   flex-direction: column;
   gap: 2px;
   padding: 14px 12px;
-  border-left: 1px solid var(--dsw-alias-border-l2);
-}
-
-.metric:first-child {
-  border-left: 0;
 }
 
 .metric span,
