@@ -90,7 +90,8 @@ describe('Usage dashboard GUI', () => {
       expect(readSnapshot).toHaveBeenCalledOnce()
       expect(container.textContent).toContain('deepseek / chat')
       expect(container.textContent).toContain('modelBreakdown')
-      expect(container.textContent).toContain(new Intl.NumberFormat().format(manyRequests))
+      expect(container.textContent).toContain(String(manyRequests))
+      expect(container.textContent).not.toContain('1万')
       expect(container.querySelectorAll('select')).toHaveLength(2)
 
       const refresh = [...container.querySelectorAll('button')].find(button => button.textContent === 'refresh')

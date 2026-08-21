@@ -196,6 +196,14 @@ export function projectSnapshot(snapshot: UsageLedgerSnapshot): UsageSnapshot {
   }
 }
 
+function exactCountText(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 0,
+    notation: 'standard',
+    useGrouping: false,
+  }).format(value)
+}
+
 function fullNumberText(value: number): string {
   return new Intl.NumberFormat().format(value)
 }
@@ -418,17 +426,17 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
         <>
           <div className={css.metrics}>
             <Metric className={css.metricTotal} label={t('totalTokens')} value={tokenText(totals.input + totals.output + totals.cached)} />
-            <Metric label={t('requests')} value={fullNumberText(totals.requests)} />
+            <Metric label={t('requests')} value={exactCountText(totals.requests)} />
             <Metric label={t('inputTokens')} value={tokenText(totals.input)} />
             <Metric label={t('outputTokens')} value={tokenText(totals.output)} />
-            <Metric label={t('unmeteredRequests')} value={fullNumberText(totals.unmetered)} />
-            <Metric label={t('failedRequests')} value={fullNumberText(totals.failed)} />
-            <Metric label={t('retryRequests')} value={fullNumberText(totals.retried)} />
+            <Metric label={t('unmeteredRequests')} value={exactCountText(totals.unmetered)} />
+            <Metric label={t('failedRequests')} value={exactCountText(totals.failed)} />
+            <Metric label={t('retryRequests')} value={exactCountText(totals.retried)} />
           </div>
 
           <div className={css.charts}>
             <article className={css.chartCard}>
-              <div className={css.chartHeading}><h3>{t('requestCurve')}</h3><span>{fullNumberText(totals.requests)}</span></div>
+              <div className={css.chartHeading}><h3>{t('requestCurve')}</h3><span>{exactCountText(totals.requests)}</span></div>
               <div className={css.curveChart}>
                 <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
                   <path className={css.gridLine} d="M 0 36 H 100" />
@@ -451,7 +459,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
                         key={bucket.date}
                         type="button"
                         aria-describedby={target?.kind === 'requests' && target.index === index ? tooltipId : undefined}
-                        aria-label={interpolate(t('requestsOn'), { date: dateText(bucket.date), requests: fullNumberText(bucket.requests), failed: fullNumberText(bucket.failed), retried: fullNumberText(bucket.retried) })}
+                        aria-label={interpolate(t('requestsOn'), { date: dateText(bucket.date), requests: exactCountText(bucket.requests), failed: exactCountText(bucket.failed), retried: exactCountText(bucket.retried) })}
                         onFocus={() => { showTarget(next) }}
                         onPointerEnter={() => { showTarget(next) }}
                         onPointerLeave={() => { setTarget(undefined) }}
@@ -511,7 +519,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
               <>
                 <strong>{dateText(activeBucket.date)}</strong>
                 {target?.kind === 'requests'
-                  ? <span>{interpolate(t('requestsOn'), { date: '', requests: fullNumberText(activeBucket.requests), failed: fullNumberText(activeBucket.failed), retried: fullNumberText(activeBucket.retried) }).replace(/^：|^: /, '')}</span>
+                  ? <span>{interpolate(t('requestsOn'), { date: '', requests: exactCountText(activeBucket.requests), failed: exactCountText(activeBucket.failed), retried: exactCountText(activeBucket.retried) }).replace(/^：|^: /, '')}</span>
                   : <span>{interpolate(t('tokensOn'), { date: '', input: tokenText(activeBucket.input), output: tokenText(activeBucket.output), cached: tokenText(activeBucket.cached) }).replace(/^：|^: /, '')}</span>}
               </>
             )}
@@ -523,7 +531,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
               <table>
                 <thead><tr><th>{t('tableModel')}</th><th>{t('tableRequests')}</th><th>{t('tableFailed')}</th><th>{t('tableRetries')}</th><th>{t('tableInput')}</th><th>{t('tableOutput')}</th><th>{t('tableTotal')}</th></tr></thead>
                 <tbody>{visibleModels.filter(row => model === 'all' || row.model === model).map(row => (
-                  <tr key={row.model}><th scope="row">{row.model}</th><td>{fullNumberText(row.requests)}</td><td>{fullNumberText(row.failed)}</td><td>{fullNumberText(row.retried)}</td><td>{tokenText(row.input)}</td><td>{tokenText(row.output)}</td><td>{tokenText(totalOf(row))}</td></tr>
+                  <tr key={row.model}><th scope="row">{row.model}</th><td>{exactCountText(row.requests)}</td><td>{exactCountText(row.failed)}</td><td>{exactCountText(row.retried)}</td><td>{tokenText(row.input)}</td><td>{tokenText(row.output)}</td><td>{tokenText(totalOf(row))}</td></tr>
                 ))}</tbody>
               </table>
             </div>
