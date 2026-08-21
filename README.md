@@ -27,9 +27,9 @@ dsh --profile web
 
 ## 用量页面预览
 
-<video src="./assets/usage-demo.mp4" controls muted playsinline width="100%">
-  <a href="./assets/usage-demo.mp4">下载用量页面演示视频</a>
-</video>
+https://github.com/user-attachments/assets/8c3c7876-d97c-4a73-abdf-bd1dc57ca906
+
+[下载用量页面演示视频](./assets/usage-demo.mp4)
 
 视频展示了 Settings → Usage 中的筛选、指标卡、图表和模型统计明细。
 
