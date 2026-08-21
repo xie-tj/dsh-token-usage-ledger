@@ -7,6 +7,7 @@ import type { UsageLedgerSnapshot } from '../host/types.js';
 export declare function installUsageStyles(): () => void;
 interface UsageEvent {
     readonly at: number;
+    readonly provider: string;
     readonly model: string;
     readonly input: number;
     readonly output: number;
@@ -17,6 +18,7 @@ interface UsageEvent {
     readonly retried: boolean;
 }
 interface ModelRow {
+    readonly provider: string;
     readonly model: string;
     readonly requests: number;
     readonly input: number;

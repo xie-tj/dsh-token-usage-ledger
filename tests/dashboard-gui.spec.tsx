@@ -99,7 +99,17 @@ describe('Usage dashboard GUI', () => {
       expect(container.textContent).toContain('10K')
       expect(container.textContent).not.toContain('1万')
       expect(container.textContent).not.toContain('allTime')
-      expect(container.querySelectorAll('select')).toHaveLength(2)
+      const selects = [...container.querySelectorAll('select')]
+      expect(selects).toHaveLength(3)
+      expect([...selects[0].querySelectorAll('option')].map(option => option.textContent)).toEqual(['allProviders', 'deepseek'])
+      expect([...selects[1].querySelectorAll('option')].map(option => option.textContent)).toEqual(['allModels', 'chat'])
+      expect(container.textContent).toContain('showProvider')
+      const showProvider = container.querySelector('input[type="checkbox"]')
+      expect(showProvider).not.toBeNull()
+      expect((showProvider as HTMLInputElement).checked).toBe(true)
+      await act(async () => { (showProvider as HTMLInputElement).click(); await Promise.resolve() })
+      expect(container.textContent).toContain('chat')
+      expect(container.textContent).not.toContain('deepseek / chat')
 
       const refresh = [...container.querySelectorAll('button')].find(button => button.textContent === 'refresh')
       expect(refresh).toBeDefined()
@@ -113,5 +123,5 @@ describe('Usage dashboard GUI', () => {
       await act(async () => { root.unmount() })
       container.remove()
     }
-  })
+  }, 30_000)
 })

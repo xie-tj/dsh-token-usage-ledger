@@ -17,6 +17,7 @@ type ChartTarget = { readonly kind: 'requests' | 'tokens'; readonly index: numbe
 
 interface UsageEvent {
   readonly at: number
+  readonly provider: string
   readonly model: string
   readonly input: number
   readonly output: number
@@ -28,6 +29,7 @@ interface UsageEvent {
 }
 
 interface ModelRow {
+  readonly provider: string
   readonly model: string
   readonly requests: number
   readonly input: number
@@ -96,12 +98,14 @@ function localDay(time: number): string | undefined {
 function mergeModelRows(rows: readonly ModelRow[]): readonly ModelRow[] {
   const merged = new Map<string, ModelRow>()
   for (const row of rows) {
-    const current = merged.get(row.model)
+    const key = `${row.provider}\u0000${row.model}`
+    const current = merged.get(key)
     if (current === undefined) {
-      merged.set(row.model, row)
+      merged.set(key, row)
       continue
     }
-    merged.set(row.model, {
+    merged.set(key, {
+      provider: current.provider,
       model: current.model,
       requests: current.requests + row.requests,
       input: current.input + row.input,
@@ -117,10 +121,12 @@ function mergeModelRows(rows: readonly ModelRow[]): readonly ModelRow[] {
   return [...merged.values()]
 }
 
-function aggregateModels(events: readonly UsageEvent[]): readonly ModelRow[] {
+function aggregateModels(events: readonly UsageEvent[], showProvider: boolean): readonly ModelRow[] {
   const rows = new Map<string, ModelRow>()
   for (const event of events) {
-    const current = rows.get(event.model) ?? {
+    const key = showProvider ? `${event.provider}\u0000${event.model}` : event.model
+    const current = rows.get(key) ?? {
+      provider: showProvider ? event.provider : '',
       model: event.model,
       requests: 0,
       input: 0,
@@ -132,7 +138,8 @@ function aggregateModels(events: readonly UsageEvent[]): readonly ModelRow[] {
       failed: 0,
       retried: 0,
     }
-    rows.set(event.model, {
+    rows.set(key, {
+      provider: current.provider,
       model: current.model,
       requests: current.requests + 1,
       input: current.input + event.input,
@@ -148,6 +155,10 @@ function aggregateModels(events: readonly UsageEvent[]): readonly ModelRow[] {
   return [...rows.values()]
 }
 
+function modelLabel(row: Pick<ModelRow, 'provider' | 'model'>, showProvider: boolean): string {
+  return showProvider && row.provider !== '' ? `${row.provider} / ${row.model}` : row.model
+}
+
 /**
  * Project the strict Host snapshot into the dashboard's display vocabulary.
  * @param snapshot - validated Host snapshot.
@@ -161,7 +172,8 @@ export function projectSnapshot(snapshot: UsageLedgerSnapshot): UsageSnapshot {
       || event.cacheWriteTokens !== undefined
     return {
       at: event.at,
-      model: `${event.provider} / ${event.model}`,
+      provider: event.provider,
+      model: event.model,
       input: event.inputTokens ?? 0,
       output: event.outputTokens ?? 0,
       cached: (event.cacheReadTokens ?? 0) + (event.cacheWriteTokens ?? 0),
@@ -172,7 +184,8 @@ export function projectSnapshot(snapshot: UsageLedgerSnapshot): UsageSnapshot {
     }
   })
   const models = mergeModelRows(snapshot.models.map(row => ({
-    model: `${row.provider} / ${row.model}`,
+    provider: row.provider,
+    model: row.model,
     requests: row.requests,
     input: row.inputTokens,
     output: row.outputTokens,
@@ -235,11 +248,13 @@ function interpolate(template: string, values: Record<string, string>): string {
 
 function selectedEvents(
   events: readonly UsageEvent[],
+  provider: string,
   model: string,
   period: Period,
   throughDay: string | undefined,
 ): readonly UsageEvent[] {
-  const byModel = model === 'all' ? events : events.filter(event => event.model === model)
+  const byProvider = provider === 'all' ? events : events.filter(event => event.provider === provider)
+  const byModel = model === 'all' ? byProvider : byProvider.filter(event => event.model === model)
   if (byModel.length === 0) return byModel
   const endDay = throughDay ?? [...byModel]
     .map(event => localDay(event.at))
@@ -327,8 +342,10 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
   const tooltipId = useId()
   const [state, setState] = useState<SnapshotState>({ status: 'loading', snapshot: undefined, error: undefined })
   const [request, setRequest] = useState(0)
+  const [provider, setProvider] = useState('all')
   const [model, setModel] = useState('all')
   const [period, setPeriod] = useState<Period>('30d')
+  const [showProvider, setShowProvider] = useState(true)
   const [target, setTarget] = useState<ChartTarget>(undefined)
 
   useEffect(() => {
@@ -353,17 +370,27 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
     () => snapshot === undefined ? [] : [...snapshot.models].sort((left, right) => totalOf(right) - totalOf(left)),
     [snapshot],
   )
+  const providers = useMemo(
+    () => [...new Set(models.map(row => row.provider))].sort(),
+    [models],
+  )
+  const modelOptions = useMemo(
+    () => [...new Set(models
+      .filter(row => provider === 'all' || row.provider === provider)
+      .map(row => row.model))].sort(),
+    [models, provider],
+  )
   const events = useMemo(
-    () => snapshot === undefined ? [] : selectedEvents(snapshot.events, model, period, snapshot.throughDay),
-    [model, period, snapshot],
+    () => snapshot === undefined ? [] : selectedEvents(snapshot.events, provider, model, period, snapshot.throughDay),
+    [model, period, provider, snapshot],
   )
   const buckets = useMemo(
-    () => snapshot === undefined ? [] : bucketsOf(events, period, snapshot.daily, snapshot.throughDay, model === 'all'),
-    [events, model, period, snapshot],
+    () => snapshot === undefined ? [] : bucketsOf(events, period, snapshot.daily, snapshot.throughDay, provider === 'all' && model === 'all'),
+    [events, model, period, provider, snapshot],
   )
   const visibleModels = useMemo(
-    () => [...aggregateModels(events)].sort((left, right) => totalOf(right) - totalOf(left)),
-    [events],
+    () => [...aggregateModels(events, showProvider)].sort((left, right) => totalOf(right) - totalOf(left)),
+    [events, showProvider],
   )
   const totals = useMemo(() => events.reduce((total, event) => ({
     requests: total.requests + 1,
@@ -419,10 +446,17 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
 
       <div className={css.filters}>
         <label>
+          <span>{t('provider')}</span>
+          <select value={provider} onChange={(event) => { setProvider(event.currentTarget.value); setModel('all') }}>
+            <option value="all">{t('allProviders')}</option>
+            {providers.map(value => <option key={value} value={value}>{value}</option>)}
+          </select>
+        </label>
+        <label>
           <span>{t('model')}</span>
           <select value={model} onChange={(event) => { setModel(event.currentTarget.value) }}>
             <option value="all">{t('allModels')}</option>
-            {models.map(row => <option key={row.model} value={row.model}>{row.model}</option>)}
+            {modelOptions.map(value => <option key={value} value={value}>{value}</option>)}
           </select>
         </label>
         <label>
@@ -437,13 +471,20 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
       {events.length === 0 ? <p className={css.empty}>{t('noData')}</p> : (
         <>
           <div className={css.metrics}>
-            <Metric className={css.metricTotal} label={t('totalTokens')} value={tokenText(totals.input + totals.output + totals.cached)} />
-            <Metric label={t('requests')} value={exactCountText(totals.requests)} />
-            <Metric label={t('inputTokens')} value={tokenText(totals.input)} />
-            <Metric label={t('outputTokens')} value={tokenText(totals.output)} />
-            <Metric label={t('unmeteredRequests')} value={exactCountText(totals.unmetered)} />
-            <Metric label={t('failedRequests')} value={exactCountText(totals.failed)} />
-            <Metric label={t('retryRequests')} value={exactCountText(totals.retried)} />
+            <div className={css.metricRowPrimary}>
+              <Metric label={t('requests')} value={exactCountText(totals.requests)} />
+              <Metric label={t('totalTokens')} value={tokenText(totals.input + totals.output + totals.cached)} />
+            </div>
+            <div className={css.metricRow}>
+              <Metric label={t('inputTokens')} value={tokenText(totals.input)} />
+              <Metric label={t('outputTokens')} value={tokenText(totals.output)} />
+              <Metric label={t('cachedTokens')} value={tokenText(totals.cached)} />
+            </div>
+            <div className={css.metricRow}>
+              <Metric label={t('unmeteredRequests')} value={exactCountText(totals.unmetered)} />
+              <Metric label={t('failedRequests')} value={exactCountText(totals.failed)} />
+              <Metric label={t('retryRequests')} value={exactCountText(totals.retried)} />
+            </div>
           </div>
 
           <div className={css.charts}>
@@ -538,12 +579,21 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
           </div>
 
           <article className={css.tableCard}>
-            <div className={css.chartHeading}><h3>{t('modelBreakdown')}</h3><span>{visibleModels.length}</span></div>
+            <div className={css.chartHeading}>
+              <h3>{t('modelBreakdown')}</h3>
+              <div className={css.tableHeadingActions}>
+                <label className={css.providerToggle}>
+                  <input type="checkbox" checked={showProvider} onChange={(event) => { setShowProvider(event.currentTarget.checked) }} />
+                  <span>{t('showProvider')}</span>
+                </label>
+                <span>{visibleModels.length}</span>
+              </div>
+            </div>
             <div className={css.tableScroll}>
               <table>
                 <thead><tr><th>{t('tableModel')}</th><th>{t('tableInput')}</th><th>{t('tableOutput')}</th><th>{t('tableCacheHit')}</th><th>{t('tableTotal')}</th><th>{t('tableRequests')}</th><th>{t('tableFailed')}</th><th>{t('tableRetries')}</th></tr></thead>
-                <tbody>{visibleModels.filter(row => model === 'all' || row.model === model).map(row => (
-                  <tr key={row.model}><th scope="row">{row.model}</th><td>{compactNumberText(row.input)}</td><td>{compactNumberText(row.output)}</td><td>{compactNumberText(row.cacheHit)}</td><td>{compactNumberText(totalOf(row))}</td><td>{compactNumberText(row.requests)}</td><td>{compactNumberText(row.failed)}</td><td>{compactNumberText(row.retried)}</td></tr>
+                <tbody>{visibleModels.map(row => (
+                  <tr key={`${row.provider}\u0000${row.model}`}><th scope="row">{modelLabel(row, showProvider)}</th><td>{compactNumberText(row.input)}</td><td>{compactNumberText(row.output)}</td><td>{compactNumberText(row.cacheHit)}</td><td>{compactNumberText(totalOf(row))}</td><td>{compactNumberText(row.requests)}</td><td>{compactNumberText(row.failed)}</td><td>{compactNumberText(row.retried)}</td></tr>
                 ))}</tbody>
               </table>
             </div>

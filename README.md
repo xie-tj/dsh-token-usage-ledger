@@ -16,7 +16,7 @@ dsh --profile web
 
 仓库包含可加载的 Host、Client 和 Typert `lib/` 产物，安装时不依赖 `prepare` 构建。若包管理器要求批准 Git dependency 的构建脚本，请按实际 profile 的 pnpm 配置处理；本包的预构建安装路径本身不需要执行源码构建。
 
-安装后打开 Settings → Usage。页面读取最近 30 个浏览器本地日历日的数据，并在浏览器内提供最近 7 天和 30 天筛选。
+安装后打开 Settings → Usage。页面读取最近 30 个浏览器本地日历日的数据，并按提供方、模型和最近 7 天或 30 天筛选；模型明细默认显示提供方，也可以关闭提供方并按具体模型聚合。
 
 ## 从源码构建
 
@@ -68,7 +68,7 @@ interface UsageLedgerSnapshotRequest {
 - `days: 30`：截至请求当天的 30 个连续日历日；
 - `timeZone: "UTC"`：决定日期范围和按日分组。
 
-Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }`，再在本地执行模型和时间范围筛选。
+Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }`，再在本地执行提供方、模型和时间范围筛选。
 
 请求在 Remote 边界执行以下校验并抛出对应错误：
 
@@ -104,7 +104,7 @@ Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }
 - `retryRequests` 标记因 `llm/retry-started` 而被后续 attempt 重试的最近 failure/aborted attempt；它不是额外生成的一次请求。
 - provider/model 优先来自 `llm/request-attempt`；仅 legacy 回填使用最近的 request route。
 - `inputTokens` 是 provider 报告的非缓存输入 token，`outputTokens` 包含 provider 报告在输出中的 reasoning token。
-- `cacheReadTokens` 与 `cacheWriteTokens` 在 API 和持久化中分开保存。Web 的 Token 流量将二者相加显示为 Cached，模型明细另外显示 `cacheReadTokens` 作为缓存命中；Input + Output + Cache Read + Cache Write 组成 Token Total。模型明细中的数值使用 K、M、B、T 紧凑单位，曲线和柱状图保留精确数字。
+- `cacheReadTokens` 与 `cacheWriteTokens` 在 API 和持久化中分开保存。Web 的 Token 流量将二者相加显示为 Cached，模型明细另外显示 `cacheReadTokens` 作为缓存命中；Input + Output + Cache Read + Cache Write 组成 Token Total。模型明细中的数值使用 K、M、B、T 紧凑单位，曲线和柱状图保留精确数字；关闭提供方显示后，相同模型会跨提供方聚合。
 - final assistant-message usage 优先于最后一个 provisional usage chunk。两者都不存在时，该 attempt 仍计入请求数，但计为 unmetered，token 为 0。
 - Host 按 workspace/provider/model 分组；当前 Web 页面在显示所有 workspace 时会把相同 provider/model 的 workspace 行合并。
 

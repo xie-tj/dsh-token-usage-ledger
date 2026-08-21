@@ -61,7 +61,8 @@ describe('Usage dashboard snapshot projection', () => {
     const projected = projectSnapshot(snapshot)
     expect(projected.events).toEqual([{
       at: Date.UTC(2026, 0, 2, 12),
-      model: 'deepseek / chat',
+      provider: 'deepseek',
+      model: 'chat',
       input: 7,
       output: 11,
       cached: 30,
@@ -71,7 +72,8 @@ describe('Usage dashboard snapshot projection', () => {
       retried: false,
     }])
     expect(projected.models).toEqual([{
-      model: 'deepseek / chat',
+      provider: 'deepseek',
+      model: 'chat',
       requests: 1,
       input: 7,
       output: 11,
@@ -120,7 +122,8 @@ describe('Usage dashboard snapshot projection', () => {
     } satisfies UsageLedgerSnapshot
 
     expect(projectSnapshot(snapshot).events[0]).toMatchObject({
-      model: 'openai / gpt',
+      provider: 'openai',
+      model: 'gpt',
       input: 0,
       output: 0,
       cached: 0,

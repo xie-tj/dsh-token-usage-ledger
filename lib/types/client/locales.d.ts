@@ -8,6 +8,8 @@ export declare const zh: {
     collapse: string;
     refresh: string;
     refreshing: string;
+    provider: string;
+    allProviders: string;
     model: string;
     allModels: string;
     period: string;
@@ -21,6 +23,7 @@ export declare const zh: {
     failedRequests: string;
     retryRequests: string;
     cachedTokens: string;
+    showProvider: string;
     requestCurve: string;
     tokenFlow: string;
     modelBreakdown: string;
@@ -52,6 +55,8 @@ export declare const en: {
     collapse: string;
     refresh: string;
     refreshing: string;
+    provider: string;
+    allProviders: string;
     model: string;
     allModels: string;
     period: string;
@@ -65,6 +70,7 @@ export declare const en: {
     failedRequests: string;
     retryRequests: string;
     cachedTokens: string;
+    showProvider: string;
     requestCurve: string;
     tokenFlow: string;
     modelBreakdown: string;

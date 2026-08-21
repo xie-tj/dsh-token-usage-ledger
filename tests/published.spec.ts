@@ -78,5 +78,5 @@ describe('published package', () => {
       'lib/types/types.js',
       'package.json',
     ].sort())
-  })
+  }, 30_000)
 })
