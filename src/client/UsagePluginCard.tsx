@@ -4,7 +4,14 @@ import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-cli
 import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
 import { UsageDashboard } from './UsageDashboard.tsx'
 import type { UsageDashboardInjected } from './UsageDashboard.tsx'
-import css from './UsagePluginCard.module.css'
+import * as styles from './UsagePluginCard.module.css'
+
+const css = styles.default
+
+/** Install the Plugins card stylesheet and return its disposer. */
+export function installUsagePluginCardStyles(): () => void {
+  return typeof styles.install === 'function' ? styles.install() : () => {}
+}
 
 /** Props composed by the keyed plugin-card slot. */
 type UsagePluginCardProps =

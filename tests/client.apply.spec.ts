@@ -2,9 +2,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const cssDisposer = vi.hoisted(() => vi.fn())
 const cssInstall = vi.hoisted(() => vi.fn(() => cssDisposer))
+const cardCssDisposer = vi.hoisted(() => vi.fn())
+const cardCssInstall = vi.hoisted(() => vi.fn(() => cardCssDisposer))
 vi.mock('../src/client/UsageDashboard.module.css', () => ({
   default: {},
   install: cssInstall,
+}))
+vi.mock('../src/client/UsagePluginCard.module.css', () => ({
+  default: {},
+  install: cardCssInstall,
 }))
 
 import { apply, inject } from '../src/client/index.ts'
@@ -161,6 +167,8 @@ describe('Usage client apply', () => {
   beforeEach(() => {
     cssInstall.mockClear()
     cssDisposer.mockClear()
+    cardCssInstall.mockClear()
+    cardCssDisposer.mockClear()
   })
 
   it('follows Host namespace availability without duplicate display contributions', async () => {
@@ -170,6 +178,7 @@ describe('Usage client apply', () => {
     b.declare('settings.plugin.item')
     const applyDisposer = await apply(b.ctx as never)
     expect(cssInstall).toHaveBeenCalledOnce()
+    expect(cardCssInstall).toHaveBeenCalledOnce()
     expect(b.entries).toHaveLength(0)
 
     b.setServed(true)
@@ -196,6 +205,7 @@ describe('Usage client apply', () => {
     await b.dispose(applyDisposer)
     expect(b.entries).toHaveLength(0)
     expect(cssDisposer).toHaveBeenCalledOnce()
+    expect(cardCssDisposer).toHaveBeenCalledOnce()
     expect(b.locale.bind('settings.usage')('nav')).toBe('nav')
   })
 

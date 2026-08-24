@@ -12,7 +12,7 @@ import { TYPERT_REMOTE } from './generated-typert-remote.ts'
 import type { UsageLedgerSnapshot } from '../host/types.ts'
 import { installUsageStyles, UsageDashboard } from './UsageDashboard.tsx'
 import type { UsageDashboardInjected } from './UsageDashboard.tsx'
-import { UsagePluginCard } from './UsagePluginCard.tsx'
+import { installUsagePluginCardStyles, UsagePluginCard } from './UsagePluginCard.tsx'
 import { en, zh, type UsageLocaleKey } from './locales.ts'
 
 /** The generated Remote result envelope used by the usage ledger. */
@@ -87,7 +87,19 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   const ownsRemote = ctx.get('remote.usageLedgerPlugin') === undefined
   const disposeRemote = ownsRemote ? await ctx.remote.$mount(TYPERT_REMOTE) : undefined
   try {
-    ctx.effect(() => installUsageStyles(), 'dsh-usage-ledger: stylesheet')
+    ctx.effect(() => {
+      const disposeDashboardStyles = installUsageStyles()
+      try {
+        const disposeCardStyles = installUsagePluginCardStyles()
+        return () => {
+          disposeCardStyles()
+          disposeDashboardStyles()
+        }
+      } catch (error) {
+        disposeDashboardStyles()
+        throw error
+      }
+    }, 'dsh-usage-ledger: stylesheets')
     ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-usage-ledger: dictionaries')
 
     const ledger = ctx.get('remote.usageLedgerPlugin')
