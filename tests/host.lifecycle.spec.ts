@@ -1,4 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it, vi } from 'vitest'
 import UsageLedgerService from '../src/host/index.ts'
 
@@ -40,5 +41,59 @@ describe('UsageLedgerService lifecycle', () => {
     expect(snapshot.daily).toHaveLength(1)
     await fiber.dispose()
     expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('releases each cold session before inspecting the next history log', async () => {
+    const first = Session.create(SessionId('usage-ledger-history-first'), undefined, {
+      version: 0,
+      id: SessionId('usage-ledger-history-first'),
+      createdAt: Date.UTC(2026, 1, 1),
+      cwd: '/history',
+    })
+    const second = Session.create(SessionId('usage-ledger-history-second'), undefined, {
+      version: 0,
+      id: SessionId('usage-ledger-history-second'),
+      createdAt: Date.UTC(2026, 1, 2),
+      cwd: '/history',
+    })
+    let releaseFirst!: () => void
+    const firstMayLoad = new Promise<void>((resolve) => { releaseFirst = resolve })
+    const state: { ctx?: Context } = {}
+    let retainedBeforeSecondInspect = -1
+    const persistence = {
+      list: vi.fn(async () => [first.header, second.header]),
+      inspect: vi.fn(async (id: SessionId) => {
+        if (id === first.id) {
+          await firstMayLoad
+          return { meta: first.header, events: first.events }
+        }
+        const ctx = state.ctx
+        if (ctx === undefined) throw new Error('usage ledger test did not initialize before history inspection')
+        retainedBeforeSecondInspect = (ctx.usageLedger as unknown as {
+          coldSessions: ReadonlySet<Session>
+        }).coldSessions.size
+        return { meta: second.header, events: second.events }
+      }),
+    }
+    const ctx = new Context()
+    const sessionTable = table()
+    const callTable = table()
+    ctx.provide('storageDomain', {
+      open: async () => ({
+        table: (name: string) => name === 'sessions' ? sessionTable : callTable,
+        close: async () => {},
+      }),
+    } as never)
+    ctx.provide('sessions', { list: () => [], get: () => undefined } as never)
+    ctx.provide('sessionPersistence', persistence as never)
+
+    const fiber = ctx.plugin(UsageLedgerService)
+    await fiber.await()
+    state.ctx = ctx
+    releaseFirst()
+    await ctx.usageLedger.snapshot({ workspace: '/history', days: 366, timeZone: 'UTC' })
+
+    expect(retainedBeforeSecondInspect).toBe(0)
+    await fiber.dispose()
   })
 })

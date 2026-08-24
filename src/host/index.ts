@@ -256,18 +256,20 @@ export class UsageLedgerService extends TypertRemoteService {
         const loaded = await persistence.inspect(header.id)
         const historical = Session.create(header.id, loaded.events, loaded.meta)
         this.coldSessions.add(historical)
-        this.adopt(historical)
+        try {
+          this.adopt(historical)
+          await this.flushSession(historical)
+        } finally {
+          this.coldSessions.delete(historical)
+          this.cursors.delete(historical)
+          this.routes.delete(historical)
+        }
       } catch (error: unknown) {
         this.ctx.logger.warn(`usage ledger: historical session '${header.id}' skipped: ${String(error)}`)
       }
     }
     await this.drainTails()
     await this.persistCursors()
-    for (const session of this.coldSessions) {
-      this.cursors.delete(session)
-      this.routes.delete(session)
-    }
-    this.coldSessions.clear()
   }
 
   /**
