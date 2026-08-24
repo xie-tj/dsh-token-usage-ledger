@@ -23,7 +23,15 @@ dsh --profile web
 
 仓库包含可加载的 Host、Client 和 Typert `lib/` 产物，安装时不依赖 `prepare` 构建。若包管理器要求批准 Git dependency 的构建脚本，请按实际 profile 的 pnpm 配置处理；本包的预构建安装路径本身不需要执行源码构建。
 
-安装后打开 Settings → Usage。页面读取最近 30 个浏览器本地日历日的数据，并按提供方、模型和最近 7 天或 30 天筛选；模型明细默认隐藏提供方并按具体模型聚合，也可以开启提供方显示。
+安装后打开 Settings → Usage。页面读取最近 30 个浏览器本地日历日的数据，并按提供方、模型和最近 7 天或 30 天筛选；模型明细默认隐藏提供方并按具体模型聚合，也可以开启提供方显示。Usage 导航和 Plugins 中的只读卡片只在 Host 正在提供 `usage-ledger` settings namespace 时注册；Loader 停用 Host 后，两处显示会随 namespace 镜像刷新而移除。
+
+卸载本包使用：
+
+```sh
+dsh plugin --profile web remove dsh-plugin-usage-ledger
+```
+
+卸载会移除本包的 bundle、`usageLedgerPlugin` Remote 和 Client 显示贡献，但不会删除 `usage_ledger` storage domain 中的已有数据。由于 bundle 不再禁用 stock Web Usage 两行，stock Host 和 Client 随后可能恢复并显示相同的 Usage 标签；这不是本包残留，需通过 Remote namespace 和 Loader 行区分。
 
 ## 用量页面预览
 
@@ -50,7 +58,7 @@ Host 插件硬依赖以下 Cordis 服务：
 - `sessions`：观察 live session；
 - `sessionPersistence`：枚举和读取历史 session。
 
-可选的 `settings` 服务存在时，插件注册只读的 `usage-ledger` 设置 namespace；缺少它不影响 Host 账本。Client 依赖 Web 的 Slots、Locale、Remote Gateway 和 Client Runtime。
+可选的 `settings` 服务存在时，插件注册只读的 `usage-ledger` 设置 namespace；缺少它不影响 Host 账本。Client 依赖 Web 的 Slots、Locale、Remote Gateway、Settings namespace 镜像和 Client Runtime。
 
 `cordis.patch.yml` 不会安装 storage-domain backend、session persistence provider，也不会为自定义 profile 增加服务路由。自定义 Cordis route、scope 或 isolate 必须让本插件能够访问上述 Host 服务，并让 Client Remote Gateway 能够访问 Host Remote；否则插件不会提供完整功能。持久化能力取决于 profile 为 `storageDomain` 配置的 backend，stock Web profile 通常使用 SQLite。
 
@@ -103,7 +111,7 @@ Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }
 
 账本观察已提交的 `llm/request-attempt`、`llm/retry-started`、usage chunk 和 `assistant/message`。call 行独立、幂等地更新；session cursor 在 `session/flush`、历史回填结束和插件关闭时写入。session disposed 时删除 cursor，但已记录的 call 行保留用于历史统计。fork 的继承前缀不会作为新 session 用量重复计入。
 
-启动时，插件通过 `sessionPersistence.list()` 枚举历史 session。live session 直接接管；非 live session 通过 `inspect()` 建立不发布到 session registry 的临时实例并回放。历史列表读取失败会记录 warning 并结束该次回填；单个 session 读取失败只跳过该 session。snapshot 仍可汇总成功写入的账本数据。
+启动时，插件通过 `sessionPersistence.list()` 枚举历史 session。live session 直接接管；非 live session 通过 `inspect()` 建立不发布到 session registry 的临时实例并回放。冷历史按 session 串行读取、写入和释放；一个解压日志完成后才读取下一个，避免同时保留全部临时 session 的事件图。历史列表读取失败会记录 warning 并结束该次回填；单个 session 读取失败只跳过该 session。snapshot 仍可汇总成功写入的账本数据。
 
 旧历史中没有 `llm/request-attempt` 时，带有 `assistant/message` 的 step 会使用 `legacy:<turn>:<step>` 合成 attempt。provider/model 从此前最近的 `request/header` 或 `request/context` 推导；无法推导时写为 `unknown`。这种兼容回填只能记录成功 assistant message，不能重建未持久化的失败 dispatch 或完整 retry 链。
 
@@ -127,7 +135,7 @@ Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }
 
 ## Settings shell 与 Usage 图标
 
-Client 注册 `settings.section`：ID 为 `usage`，顺序为 20，并提供中英文文案。Host 注册的空设置 schema 使 Plugins 设置页可展示该插件，但当前没有可编辑选项。
+Client 注册一组由 Host capability 控制的显示贡献：`settings.section` 的 ID 为 `usage`、顺序为 20，`settings.plugin.item` 的 key 为 `usage-ledger`。两者使用相同的中英文文案和只读 dashboard，并在 settings namespace 镜像不再包含 `usage-ledger` 时一起释放。Host 注册的空设置 schema 不提供可编辑选项。
 
 侧栏图标由 Settings shell 根据 section ID 映射，不由本插件注册。包含 `usage` 图标映射的兼容 Web shell 会显示柱状图图标；旧版或自定义 shell 可能只显示标签或默认图标，但这不改变 Usage section 和 Remote 数据功能。
 
@@ -139,7 +147,7 @@ Client 注册 `settings.section`：ID 为 `usage`，顺序为 20，并提供中�
 - 持久化保留、清理、导出和迁移工具未实现。
 - best-effort warning 只写 Host 日志；页面没有逐 session 回填诊断。
 - 插件设置卡当前只读，没有运行时配置项。
-- 回归测试覆盖发布入口、Typert source location、Client late-slot/HMR 生命周期、Host service 生命周期、快照字段投影和 patch 文件组合；它们不替代真实 Web profile 启动测试。
+- 回归测试覆盖发布入口、Typert source location、Client Host-availability/late-slot/HMR 生命周期、Plugins 卡交互、Host service 生命周期、快照字段投影和 patch 文件组合；它们不替代真实 Web profile 启动测试。
 
 ## 验证
 

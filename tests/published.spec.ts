@@ -30,7 +30,7 @@ describe('published package', () => {
     expect(Object.keys(types)).toEqual([])
     expect(packageJson.name).toBe('dsh-plugin-usage-ledger')
     expect(client.registration.id).toBe('dsh-plugin-usage-ledger')
-    expect(client.plugin).toMatchObject({ inject: ['slots', 'locale', 'remote'] })
+    expect(client.plugin).toMatchObject({ inject: ['slots', 'locale', 'remote', 'settingsScope'] })
     expect(client.plugin).toHaveProperty('apply')
   })
 
@@ -55,6 +55,8 @@ describe('published package', () => {
       'lib/typert.remote-client.js',
       'lib/types/client/UsageDashboard.d.ts',
       'lib/types/client/UsageDashboard.js',
+      'lib/types/client/UsagePluginCard.d.ts',
+      'lib/types/client/UsagePluginCard.js',
       'lib/types/client/generated-typert-remote.d.ts',
       'lib/types/client/generated-typert-remote.js',
       'lib/types/client/index.d.ts',

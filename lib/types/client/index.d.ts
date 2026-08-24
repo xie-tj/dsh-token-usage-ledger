@@ -1,4 +1,4 @@
-/** Browser-side Usage Settings page. */
+/** Browser-side Usage Settings page and Plugins configuration card. */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client';
 import { type UsageLocaleKey } from './locales.js';
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -9,5 +9,5 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 /** Required Cordis services; the local Remote contribution is mounted during apply. */
 export declare const inject: string[];
-/** Register the localized Usage section once its settings slot is declared. */
+/** Register the localized Usage displays while their Host namespace is available. */
 export declare function apply(ctx: ClientContext): Promise<() => Promise<void>>;

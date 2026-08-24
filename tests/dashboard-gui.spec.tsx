@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { UsageDashboard } from '../src/client/UsageDashboard.tsx'
+import { UsagePluginCard } from '../src/client/UsagePluginCard.tsx'
 import type { UsageLedgerSnapshot } from '../src/types.ts'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -12,6 +13,7 @@ vi.mock('../src/client/UsageDashboard.module.css', () => ({
   default: {},
   install: vi.fn(() => vi.fn()),
 }))
+vi.mock('../src/client/UsagePluginCard.module.css', () => ({ default: {} }))
 
 const snapshot: UsageLedgerSnapshot = {
   workspace: null,
@@ -124,4 +126,42 @@ describe('Usage dashboard GUI', () => {
       container.remove()
     }
   }, 30_000)
+
+  it('loads the dashboard only after its Plugins card expands', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    const readSnapshot = vi.fn(async () => snapshot)
+    const translate = (key: string) => key
+
+    try {
+      await act(async () => {
+        root.render(
+          <UsagePluginCard
+            readSnapshot={readSnapshot}
+            t={translate as never}
+            useSessions={vi.fn() as never}
+            useWorkspaces={vi.fn() as never}
+          />,
+        )
+      })
+      const toggle = container.querySelector('button')
+      expect(toggle?.getAttribute('aria-expanded')).toBe('false')
+      expect(container.textContent).toContain('title')
+      expect(container.textContent).toContain('intro')
+      expect(readSnapshot).not.toHaveBeenCalled()
+
+      await act(async () => {
+        toggle?.click()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(toggle?.getAttribute('aria-expanded')).toBe('true')
+      expect(readSnapshot).toHaveBeenCalledOnce()
+      expect(container.textContent).toContain('chat')
+    } finally {
+      await act(async () => { root.unmount() })
+      container.remove()
+    }
+  })
 })
