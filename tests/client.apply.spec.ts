@@ -43,15 +43,15 @@ function bench(options: { served?: boolean; remote?: boolean; ensure?: Promise<v
       daily: [],
     })),
   }
-  const remote: {
-    usageLedgerPlugin?: typeof remoteNamespace
-    $mount: ReturnType<typeof vi.fn>
-  } = {
-    usageLedgerPlugin: options.remote === false ? undefined : remoteNamespace,
+  let remoteValue: typeof remoteNamespace | undefined = options.remote === false ? undefined : remoteNamespace
+  const remote = {
+    get usageLedgerPlugin(): never {
+      throw new Error('optional Remote namespace was read through the injected property proxy')
+    },
     $mount: vi.fn(async () => {
-      remote.usageLedgerPlugin = remoteNamespace
+      remoteValue = remoteNamespace
       return vi.fn(async () => {
-        remote.usageLedgerPlugin = undefined
+        remoteValue = undefined
       })
     }),
   }
@@ -113,6 +113,9 @@ function bench(options: { served?: boolean; remote?: boolean; ensure?: Promise<v
     slots,
     settingsScope,
     logger,
+    get(name: string) {
+      return name === 'remote.usageLedgerPlugin' ? remoteValue : undefined
+    },
     effect(effect: () => (() => void) | undefined) {
       const disposer = effect()
       if (disposer !== undefined) effectDisposers.push(disposer)
@@ -122,6 +125,7 @@ function bench(options: { served?: boolean; remote?: boolean; ensure?: Promise<v
     ctx,
     entries,
     remote,
+    getRemote: () => remoteValue,
     locale,
     logger,
     declare(name: string) {
@@ -249,8 +253,8 @@ describe('Usage client apply', () => {
     const b = bench({ remote: false })
     const applyDisposer = await apply(b.ctx as never)
     expect(b.remote.$mount).toHaveBeenCalledOnce()
-    expect(b.remote.usageLedgerPlugin).toBeDefined()
+    expect(b.getRemote()).toBeDefined()
     await b.dispose(applyDisposer)
-    expect(b.remote.usageLedgerPlugin).toBeUndefined()
+    expect(b.getRemote()).toBeUndefined()
   })
 })

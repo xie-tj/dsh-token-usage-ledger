@@ -84,13 +84,14 @@ function unpackSnapshot(response: RemoteResult<UsageLedgerSnapshot> | UsageLedge
 export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   // Stock dsh builds that already mount this namespace are reused; older builds
   // receive the generated contribution from this package.
-  const ownsRemote = ctx.remote.usageLedgerPlugin === undefined
+  const ownsRemote = ctx.get('remote.usageLedgerPlugin') === undefined
   const disposeRemote = ownsRemote ? await ctx.remote.$mount(TYPERT_REMOTE) : undefined
   try {
     ctx.effect(() => installUsageStyles(), 'dsh-usage-ledger: stylesheet')
     ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-usage-ledger: dictionaries')
 
-    const ledger = ctx.remote.usageLedgerPlugin
+    const ledger = ctx.get('remote.usageLedgerPlugin')
+    if (ledger === undefined) throw new Error('dsh-usage-ledger: generated Remote namespace did not mount')
     const injected = (): UsageDashboardInjected => ({
       readSnapshot: async (): Promise<UsageLedgerSnapshot> => {
         const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
