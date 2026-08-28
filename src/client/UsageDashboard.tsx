@@ -547,6 +547,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
                         input: tokenText(bucket.input),
                         output: tokenText(bucket.output),
                         cached: tokenText(bucket.cached),
+                        total: tokenText(totalOf(bucket)),
                       })}
                       onFocus={() => { showTarget(next) }}
                       onPointerEnter={() => { showTarget(next) }}
@@ -574,7 +575,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
                 <strong>{dateText(activeBucket.date)}</strong>
                 {target?.kind === 'requests'
                   ? <span>{interpolate(t('requestsOn'), { date: '', requests: exactCountText(activeBucket.requests), failed: exactCountText(activeBucket.failed), retried: exactCountText(activeBucket.retried) }).replace(/^：|^: /, '')}</span>
-                  : <span>{interpolate(t('tokensOn'), { date: '', input: tokenText(activeBucket.input), output: tokenText(activeBucket.output), cached: tokenText(activeBucket.cached) }).replace(/^：|^: /, '')}</span>}
+                  : <span>{interpolate(t('tokensOn'), { date: '', input: tokenText(activeBucket.input), output: tokenText(activeBucket.output), cached: tokenText(activeBucket.cached), total: tokenText(totalOf(activeBucket)) }).replace(/^：|^: /, '')}</span>}
               </>
             )}
           </div>

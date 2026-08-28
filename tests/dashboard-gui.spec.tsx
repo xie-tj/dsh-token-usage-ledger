@@ -127,6 +127,31 @@ describe('Usage dashboard GUI', () => {
     }
   }, 30_000)
 
+  it('shows the selected day total in the token bar label and tooltip', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    const readSnapshot = vi.fn(async () => snapshot)
+    const translate = (key: string) => key === 'tokensOn' ? 'tokensOn：输入 {input}，输出 {output}，缓存 {cached}，总计 {total}' : key
+
+    try {
+      await act(async () => {
+        root.render(<UsageDashboard readSnapshot={readSnapshot} t={translate as never} />)
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      const tokenBar = [...container.querySelectorAll('button')].find(button => button.getAttribute('aria-label')?.includes('输入 7'))
+      expect(tokenBar).toBeDefined()
+      expect(tokenBar?.getAttribute('aria-label')).toContain('总计 48')
+
+      await act(async () => { tokenBar?.focus() })
+      expect(container.querySelector('[role="tooltip"]')?.textContent).toContain('总计 48')
+    } finally {
+      await act(async () => { root.unmount() })
+      container.remove()
+    }
+  })
+
   it('loads the dashboard only after its Plugins card expands', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
