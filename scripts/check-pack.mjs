@@ -19,7 +19,6 @@ try {
     'package/cordis.patch.yml',
     'package/lib/index.js',
     'package/lib/client.js',
-    'package/lib/invariant.js',
     'package/lib/typert.host.js',
     'package/lib/typert.remote-client.js',
     'package/lib/types/index.d.ts',
