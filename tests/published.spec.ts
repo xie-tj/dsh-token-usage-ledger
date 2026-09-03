@@ -16,7 +16,6 @@ interface PackResult {
 describe('published package', () => {
   it('loads every JavaScript export through its published package entry', async () => {
     const host = await import('dsh-plugin-usage-ledger')
-    const invariant = await import('dsh-plugin-usage-ledger/invariant')
     const typert = await import('dsh-plugin-usage-ledger/typert')
     const remote = await import('dsh-plugin-usage-ledger/remote')
     const types = await import('dsh-plugin-usage-ledger/types')
@@ -24,7 +23,6 @@ describe('published package', () => {
     const client = await loadPublishedClient()
 
     expect(host.default).toBe(host.UsageLedgerService)
-    expect(invariant.name).toBe('usage-ledger-invariant')
     expect(typert.TYPERT).toBeDefined()
     expect(remote.default).toBe(remote.TYPERT_REMOTE)
     expect(Object.keys(types)).toEqual([])
@@ -48,7 +46,6 @@ describe('published package', () => {
       'cordis.patch.yml',
       'lib/client.js',
       'lib/index.js',
-      'lib/invariant.js',
       'lib/typert.host.d.ts',
       'lib/typert.host.js',
       'lib/typert.remote-client.d.ts',
@@ -67,16 +64,12 @@ describe('published package', () => {
       'lib/types/host/event-types.js',
       'lib/types/host/index.d.ts',
       'lib/types/host/index.js',
-      'lib/types/host/invariant.d.ts',
-      'lib/types/host/invariant.js',
       'lib/types/host/spec.d.ts',
       'lib/types/host/spec.js',
       'lib/types/host/types.d.ts',
       'lib/types/host/types.js',
       'lib/types/index.d.ts',
       'lib/types/index.js',
-      'lib/types/invariant.d.ts',
-      'lib/types/invariant.js',
       'lib/types/types.d.ts',
       'lib/types/types.js',
       'package.json',

@@ -101,7 +101,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerSnapshot',
         schema: dsh_plugin_usage_ledger_usageLedgerPlugin_snapshot_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":281,"column":9},
+      sourceLocation: {"file":"src/host/index.ts","line":440,"column":9},
     },
   ],
 }

@@ -63,7 +63,7 @@ describe('published Host artifacts', () => {
 })
 
 describe('bundle composition', () => {
-  it('disables only known built-in Web rows and inserts one external replacement', async () => {
+  it('inserts one external replacement without targeting removed alpha.5 rows', async () => {
     const patchText = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
     const patch = parseYaml(patchText) as readonly PatchOperation[]
     const storageConfig = {
@@ -73,13 +73,10 @@ describe('bundle composition', () => {
     }
     const profile: readonly ProfileRow[] = [
       { id: 'storage-domain', name: '@deepseek-ai/dsh-storage-domain', config: storageConfig },
-      { id: 'usage-ledger', name: '@deepseek-ai/dsh-usage-ledger' },
-      { id: 'ui-settings-usage', name: '@deepseek-ai/dsh-client-ui-settings-usage' },
     ]
     const composed = applyPatch(profile, patch)
     expect(composed.find(row => row.id === 'storage-domain')?.config).toEqual(storageConfig)
-    expect(composed.filter(row => row.id === 'usage-ledger' && row.disabled).length).toBe(1)
-    expect(composed.filter(row => row.id === 'ui-settings-usage' && row.disabled).length).toBe(1)
+    expect(patch.some(operation => !('insert' in operation))).toBe(false)
     expect(composed.filter(row => row.name === 'dsh-plugin-usage-ledger')).toHaveLength(1)
     expect(applyPatch(profile.slice(0, 1), patch).filter(row => row.name === 'dsh-plugin-usage-ledger')).toHaveLength(1)
     expect(patchText).not.toContain('storage-domain:')
