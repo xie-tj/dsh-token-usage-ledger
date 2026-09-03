@@ -466,6 +466,54 @@ describe('UsageLedgerService lifecycle', () => {
     await fiber.dispose()
   })
 
+  it('replays child-owned constructor seed events from a live seeded session', async () => {
+    const sessionId = SessionId('usage-ledger-live-seeded-child')
+    const eventTime = Date.UTC(2026, 1, 5, 15)
+    const live = Session.create(sessionId, [
+      {
+        type: 'request/context',
+        seq: 0,
+        time: eventTime,
+        data: { provider: 'deepseek', model: 'deepseek-chat' },
+      },
+      {
+        type: 'assistant/chunk',
+        seq: 1,
+        time: eventTime + 1,
+        data: {
+          turn: 0,
+          step: 0,
+          chunk: { type: 'usage', usage: { inputTokens: 8, outputTokens: 5 } },
+        },
+      },
+    ] as never, {
+      version: 0,
+      id: sessionId,
+      createdAt: eventTime,
+      cwd: '/live-seeded-child',
+      parentSession: SessionId('usage-ledger-live-seeded-parent'),
+      isSeeded: true,
+    }, 1 as never)
+    const sessionTable = table()
+    const callTable = table()
+    const ctx = new Context()
+    ctx.provide('storageDomain', { open: async () => ({
+      table: (name: string) => name === 'sessions' ? sessionTable : callTable,
+      close: async () => {},
+    }) } as never)
+    ctx.provide('sessions', { list: () => [live], get: (id: SessionId) => id === live.id ? live : undefined } as never)
+    ctx.provide('sessionPersistence', { list: async () => [] } as never)
+
+    const fiber = ctx.plugin(UsageLedgerService)
+    await fiber.await()
+    const snapshot = await ctx.usageLedger.snapshot({ workspace: '/live-seeded-child', days: 366, timeZone: 'UTC' })
+
+    expect(snapshot.events).toMatchObject([{
+      provider: 'deepseek', model: 'deepseek-chat', inputTokens: 8, outputTokens: 5,
+    }])
+    await fiber.dispose()
+  })
+
   it('releases each cold session before inspecting the next history log', async () => {
     const first = Session.create(SessionId('usage-ledger-history-first'), undefined, {
       version: 0,
@@ -559,6 +607,7 @@ describe('UsageLedgerService lifecycle', () => {
     expect(snapshot.events).toEqual(expect.arrayContaining([
       expect.objectContaining({ outcome: 'failure' }), expect.objectContaining({ outcome: 'aborted' }),
     ]))
+    expect(sessionTable.get(sessionId)).toMatchObject({ activeAttempts: {} })
     await fiber.dispose()
   })
 

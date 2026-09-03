@@ -72,7 +72,7 @@ export declare class UsageLedgerService extends TypertRemoteService {
     private recordProvisionalUsage;
     /** Replace the successful attempt's provisional metering with final message usage. */
     private replaceFinalUsage;
-    /** Create the initial cursor at the first live sequence after a fork prefix. */
+    /** Create the initial cursor immediately before this session's owned event suffix. */
     private emptySessionRow;
     /** Serialize one session's best-effort observer work without delaying append. */
     private enqueue;

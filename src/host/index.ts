@@ -557,15 +557,16 @@ export class UsageLedgerService extends TypertRemoteService {
     const stored = this.cursors.get(session) ?? sessions.get(session.id)
     const initial = sameLifecycle(stored, session) ? stored : this.emptySessionRow(session)
     let current = initial
-    const firstLiveSeq = session.firstLiveSeq
+    const inheritedEventCount = session.inheritedEventCount
     const startSeq = this.coldSessions.has(session)
       ? current.observedSeq + 1
-      : Math.max(firstLiveSeq, current.observedSeq + 1)
+      : Math.max(inheritedEventCount, current.observedSeq + 1)
     // Detached Session.create(seed) adds an in-memory seed boundary; cold replay reads the persisted prefix.
-    const eventCount = this.coldSessions.has(session) ? session.firstLiveSeq : session.snapshotEvents().length
+    const events = session.snapshotEvents()
+    const eventCount = this.coldSessions.has(session) ? session.firstLiveSeq : events.length
     let route = this.routes.get(session) ?? routeBefore(session, startSeq)
     for (let seq = startSeq; seq <= throughSeq && seq < eventCount; seq += 1) {
-      const event = session.snapshotEvents()[seq]
+      const event = events[seq]
       if (event === undefined) continue
       route = routeAfter(route, event)
       current = { ...await this.processEvent(session, current, event, route), observedSeq: event.seq }
@@ -744,14 +745,13 @@ export class UsageLedgerService extends TypertRemoteService {
   ): Promise<UsageLedgerSessionRow> {
     for (const [stepId, attemptId] of Object.entries(current.activeAttempts)) {
       const row = this.requireCalls().get(callKey(session, attemptId))
-      if (row !== undefined && row.turn === turn && row.outcome === undefined) {
+      if (row === undefined || row.turn !== turn) continue
+      if (row.outcome === undefined) {
         await this.requireCalls().put(callKey(session, attemptId), { ...row, outcome })
       }
-      if (row !== undefined && row.turn === turn && row.outcome !== undefined) {
-        const activeAttempts = { ...current.activeAttempts }
-        Reflect.deleteProperty(activeAttempts, stepId)
-        current = { ...current, activeAttempts }
-      }
+      const activeAttempts = { ...current.activeAttempts }
+      Reflect.deleteProperty(activeAttempts, stepId)
+      current = { ...current, activeAttempts }
     }
     return current
   }
@@ -816,12 +816,12 @@ export class UsageLedgerService extends TypertRemoteService {
     return current
   }
 
-  /** Create the initial cursor at the first live sequence after a fork prefix. */
+  /** Create the initial cursor immediately before this session's owned event suffix. */
   private emptySessionRow(session: Session): UsageLedgerSessionRow {
     return {
       createdAt: session.header.createdAt,
       ...(session.header.cwd === undefined ? {} : { workspace: session.header.cwd }),
-      observedSeq: this.coldSessions.has(session) ? -1 : session.firstLiveSeq - 1,
+      observedSeq: this.coldSessions.has(session) ? -1 : session.inheritedEventCount - 1,
       activeAttempts: {},
       successfulAttempts: {},
     }
