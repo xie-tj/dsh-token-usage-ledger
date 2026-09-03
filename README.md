@@ -102,7 +102,7 @@ Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }
 - `timeZone` 不是 `Intl.DateTimeFormat` 接受的 IANA 时区：`RangeError: usage ledger timeZone is invalid: '<value>'`；
 - `days` 不是 1–366 的安全整数：`RangeError: usage ledger days must be a safe integer from 1 through 366`。
 
-返回值包括请求解析后的范围、生成时间、范围内的逐尝试 `events`、按 workspace/provider/model 聚合的 `models`，以及包含零用量日期的 `daily`。生成 snapshot 前，Host 会等待历史回填和已观察到的 session 队列完成。
+返回值包括请求解析后的范围、生成时间、范围内的逐尝试 `events`、按 workspace/provider/model 聚合的 `models`，以及包含零用量日期的 `daily`。生成 snapshot 前，Host 会接管 live session 并排空已观察到的 live 队列，但不会等待全部历史回填；页面先展示当前已持久化的数据，回填期间可使用刷新按钮获取新增记录。
 
 ## 持久化与历史回填
 

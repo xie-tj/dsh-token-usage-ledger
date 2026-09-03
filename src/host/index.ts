@@ -439,7 +439,6 @@ export class UsageLedgerService extends TypertRemoteService {
   @Remote('snapshot')
   async snapshot(request?: UsageLedgerSnapshotRequest): Promise<UsageLedgerSnapshot> {
     if (this.backfillPromise === undefined) this.backfillPromise = this.backfill(this.ctx.sessionPersistence)
-    await this.backfillPromise
     for (const session of this.ctx.sessions.list()) this.adopt(session)
     await this.drainTails()
     const resolved = resolveSnapshotRequest(request)

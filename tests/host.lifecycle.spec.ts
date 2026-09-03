@@ -14,6 +14,10 @@ function table() {
   }
 }
 
+async function waitForBackfill(ctx: Context): Promise<void> {
+  await (ctx.usageLedger as unknown as { backfillPromise?: Promise<void> }).backfillPromise
+}
+
 describe('UsageLedgerService lifecycle', () => {
   it('opens its domain, serves an empty snapshot, and closes the domain on disposal', async () => {
     const ctx = new Context()
@@ -42,6 +46,76 @@ describe('UsageLedgerService lifecycle', () => {
     expect(snapshot.daily).toHaveLength(1)
     await fiber.dispose()
     expect(close).toHaveBeenCalledOnce()
+  })
+
+  it('serves persisted usage while historical backfill is still running', async () => {
+    const eventTime = Date.UTC(2026, 8, 3, 12)
+    const sessionId = SessionId('usage-ledger-slow-backfill')
+    const sessionTable = table()
+    const callTable = table()
+    await callTable.put('existing-call', {
+      sessionId,
+      createdAt: eventTime,
+      workspace: '/slow-backfill',
+      day: '2026-09-03',
+      attemptId: 'existing-attempt',
+      startedAt: eventTime,
+      turn: 0,
+      step: 0,
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      outcome: 'success',
+      finalUsage: { inputTokens: 21, outputTokens: 13, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    })
+    let releaseRead!: () => void
+    const readGate = new Promise<void>((resolve) => { releaseRead = resolve })
+    let announceRead!: () => void
+    const readStarted = new Promise<void>((resolve) => { announceRead = resolve })
+    const header = {
+      version: 0,
+      id: sessionId,
+      createdAt: eventTime,
+      cwd: '/slow-backfill',
+      isSeeded: false,
+    }
+    const ctx = new Context()
+    ctx.provide('storageDomain', { open: async () => ({
+      table: (name: string) => name === 'sessions' ? sessionTable : callTable,
+      close: async () => {},
+    }) } as never)
+    ctx.provide('sessions', { list: () => [], get: () => undefined } as never)
+    ctx.provide('sessionPersistence', {
+      list: async () => [{ header, revision: 'slow' }],
+      open: async () => ({
+        header,
+        inheritedEventCount: 0,
+        read: async () => {
+          announceRead()
+          await readGate
+          return []
+        },
+        close: async () => {},
+      }),
+    } as never)
+
+    const fiber = ctx.plugin(UsageLedgerService)
+    await fiber.await()
+    await readStarted
+    const snapshotPromise = ctx.usageLedger.snapshot({ workspace: '/slow-backfill', days: 1, timeZone: 'UTC' })
+    const result = await Promise.race([
+      snapshotPromise,
+      new Promise<'timeout'>(resolve => setTimeout(() => { resolve('timeout') }, 100)),
+    ])
+    releaseRead()
+    if (result === 'timeout') await snapshotPromise
+
+    expect(result).not.toBe('timeout')
+    if (result !== 'timeout') {
+      expect(result.events).toMatchObject([{
+        inputTokens: 21, outputTokens: 13, provider: 'deepseek', model: 'deepseek-chat',
+      }])
+    }
+    await fiber.dispose()
   })
 
   it('backfills usage-bearing events from persisted cold sessions into an empty ledger', async () => {
@@ -96,6 +170,7 @@ describe('UsageLedgerService lifecycle', () => {
 
     const fiber = ctx.plugin(UsageLedgerService)
     await fiber.await()
+    await waitForBackfill(ctx)
     const snapshot = await ctx.usageLedger.snapshot({ workspace: '/history', days: 366, timeZone: 'UTC' })
 
     expect(snapshot.events).toMatchObject([{
@@ -250,6 +325,7 @@ describe('UsageLedgerService lifecycle', () => {
 
     const fiber = ctx.plugin(UsageLedgerService)
     await fiber.await()
+    await waitForBackfill(ctx)
     const snapshot = await ctx.usageLedger.snapshot({ workspace: '/retry', days: 366, timeZone: 'UTC' })
 
     expect(snapshot.events).toHaveLength(3)
@@ -325,6 +401,7 @@ describe('UsageLedgerService lifecycle', () => {
 
       const fiber = ctx.plugin(UsageLedgerService)
       await fiber.await()
+      await waitForBackfill(ctx)
       const snapshot = await ctx.usageLedger.snapshot({ workspace: '/retry-scheduled', days: 366, timeZone: 'UTC' })
 
       expect(snapshot.events).toHaveLength(scenario.expectedCalls)
@@ -387,6 +464,7 @@ describe('UsageLedgerService lifecycle', () => {
 
       const fiber = ctx.plugin(UsageLedgerService)
       await fiber.await()
+      await waitForBackfill(ctx)
       snapshots.push(await ctx.usageLedger.snapshot({ workspace: '/seeded', days: 366, timeZone: 'UTC' }))
       await fiber.dispose()
     }
@@ -458,6 +536,7 @@ describe('UsageLedgerService lifecycle', () => {
 
     const fiber = ctx.plugin(UsageLedgerService)
     await fiber.await()
+    await waitForBackfill(ctx)
     const snapshot = await ctx.usageLedger.snapshot({ workspace: '/reused-session', days: 366, timeZone: 'UTC' })
 
     expect(snapshot.events).toMatchObject([{
@@ -573,6 +652,7 @@ describe('UsageLedgerService lifecycle', () => {
     await fiber.await()
     state.ctx = ctx
     releaseFirst()
+    await waitForBackfill(ctx)
     await ctx.usageLedger.snapshot({ workspace: '/history', days: 366, timeZone: 'UTC' })
 
     expect(retainedBeforeSecondInspect).toBe(0)
@@ -602,6 +682,7 @@ describe('UsageLedgerService lifecycle', () => {
     ctx.provide('sessionPersistence', persistence as never)
     const fiber = ctx.plugin(UsageLedgerService)
     await fiber.await()
+    await waitForBackfill(ctx)
     const snapshot = await ctx.usageLedger.snapshot({ workspace: '/terminal', days: 366, timeZone: 'UTC' })
     expect(snapshot.models).toMatchObject([{ requests: 2, failedRequests: 2, unmeteredRequests: 2 }])
     expect(snapshot.events).toEqual(expect.arrayContaining([
