@@ -361,12 +361,16 @@ describe('UsageLedgerService lifecycle', () => {
       parentSession: SessionId('usage-ledger-parent'), isSeeded: true,
     }
     const inspect = vi.fn(async () => ({ meta: header, inheritedEventCount: 2, events }))
-    const read = vi.fn(async (offset = 0, length = 256) => events.slice(offset, offset + length))
-    const close = vi.fn(async () => {})
+    const read = vi.fn(function (this: { events: UsageSessionEvent[] }, offset = 0, length = 256) {
+      return Promise.resolve(this.events.slice(offset, offset + length))
+    })
+    const close = vi.fn(function (this: { closed: boolean }) {
+      this.closed = true
+      return Promise.resolve()
+    })
+    const openHandle = { header, inheritedEventCount: 2, events, closed: false, read, close }
     const faces = [
-      { list: vi.fn(async () => [{ header, revision: 'seeded' }]), open: vi.fn(async () => ({
-        header, inheritedEventCount: 2, read, close,
-      })) },
+      { list: vi.fn(async () => [{ header, revision: 'seeded' }]), open: vi.fn(async () => openHandle) },
       { list: vi.fn(async () => [header]), inspect },
     ]
     const snapshots = []
@@ -390,6 +394,7 @@ describe('UsageLedgerService lifecycle', () => {
     expect(inspect).toHaveBeenCalledOnce()
     expect(read).toHaveBeenCalledWith(0, 256)
     expect(close).toHaveBeenCalledOnce()
+    expect(openHandle.closed).toBe(true)
     const comparable = snapshots.map(({ updatedAt: _, ...snapshot }) => snapshot)
     expect(comparable[0]).toEqual(comparable[1])
     expect(comparable[0].models).toMatchObject([{
@@ -397,6 +402,68 @@ describe('UsageLedgerService lifecycle', () => {
       inputTokens: 5, outputTokens: 3, meteredRequests: 1,
     }])
     expect(comparable[0].events).toHaveLength(1)
+  })
+
+  it('resets a stale cursor when a session id belongs to a new lifecycle', async () => {
+    const sessionId = SessionId('usage-ledger-reused-session-id')
+    const eventTime = Date.UTC(2026, 1, 5, 14)
+    const historical = Session.create(sessionId, [
+      {
+        type: 'request/context',
+        seq: 0,
+        time: eventTime,
+        data: { provider: 'deepseek', model: 'deepseek-chat' },
+      },
+      {
+        type: 'assistant/chunk',
+        seq: 1,
+        time: eventTime + 1,
+        data: {
+          turn: 0,
+          step: 0,
+          chunk: { type: 'usage', usage: { inputTokens: 7, outputTokens: 4 } },
+        },
+      },
+    ] as never, {
+      version: 0,
+      id: sessionId,
+      createdAt: eventTime,
+      cwd: '/reused-session',
+      isSeeded: false,
+    })
+    const sessionTable = table()
+    const callTable = table()
+    await sessionTable.put(sessionId, {
+      createdAt: eventTime - 1,
+      workspace: '/old-lifecycle',
+      observedSeq: 100,
+      activeAttempts: {},
+      successfulAttempts: {},
+    })
+    const ctx = new Context()
+    ctx.provide('storageDomain', { open: async () => ({
+      table: (name: string) => name === 'sessions' ? sessionTable : callTable,
+      close: async () => {},
+    }) } as never)
+    ctx.provide('sessions', { list: () => [], get: () => undefined } as never)
+    ctx.provide('sessionPersistence', {
+      list: async () => [{ header: historical.header, revision: 'new-lifecycle' }],
+      open: async () => ({
+        header: historical.header,
+        inheritedEventCount: 0,
+        read: async (offset = 0, length = Number.MAX_SAFE_INTEGER) => historical.snapshotEvents().slice(offset, offset + length),
+        close: async () => {},
+      }),
+    } as never)
+
+    const fiber = ctx.plugin(UsageLedgerService)
+    await fiber.await()
+    const snapshot = await ctx.usageLedger.snapshot({ workspace: '/reused-session', days: 366, timeZone: 'UTC' })
+
+    expect(snapshot.events).toMatchObject([{
+      provider: 'deepseek', model: 'deepseek-chat', inputTokens: 7, outputTokens: 4,
+    }])
+    await fiber.dispose()
   })
 
   it('releases each cold session before inspecting the next history log', async () => {

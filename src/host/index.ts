@@ -234,7 +234,9 @@ async function openHistorical(persistence: SessionPersistence, descriptor: Histo
     if (!isRecord(raw) || typeof raw.close !== 'function') {
       throw new TypeError('usage ledger received an invalid session read handle')
     }
-    const close = raw.close as () => Promise<void>
+    const close = async (): Promise<void> => {
+      await (raw.close as () => Promise<void>).call(raw)
+    }
     let closed = false
     const closeOnce = async (): Promise<void> => {
       if (closed) return
@@ -256,7 +258,7 @@ async function openHistorical(persistence: SessionPersistence, descriptor: Histo
         header,
         inheritedEventCount: cut,
         read: async (offset = 0, length = HISTORICAL_READ_BATCH_SIZE) => {
-          const events = await read(offset, length)
+          const events = await read.call(raw, offset, length)
           if (!Array.isArray(events)) throw new TypeError('usage ledger received an invalid session event batch')
           return events as UsageSessionEvent[]
         },
@@ -384,7 +386,8 @@ export class UsageLedgerService extends TypertRemoteService {
           const historical = { id, header: handle.header, inheritedEventCount: handle.inheritedEventCount } as Session
           this.coldSessions.add(historical)
           try {
-            let current = this.cursors.get(historical) ?? this.requireSessions().get(id) ?? this.emptySessionRow(historical)
+            const stored = this.requireSessions().get(id)
+            let current = sameLifecycle(stored, historical) ? stored : this.emptySessionRow(historical)
             let route = this.routes.get(historical) ?? { provider: 'unknown', model: 'unknown' }
             let offset = 0
             while (this.accepting) {
