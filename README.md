@@ -10,7 +10,7 @@
 - 灵活筛选：支持提供方、模型和最近 7 天／30 天筛选，模型明细默认按具体模型聚合；
 - 缓存可见：单独展示缓存命中 token，并保留失败、未计量和重试请求。
 
-当前版本按 `@deepseek-ai/dsh` `0.1.0-rc.8` 依赖线构建，要求 Node.js `^22.19.0 || >=24.0.0`。
+当前版本按 `@deepseek-ai/dsh` `0.1.1-rc.2` 依赖线构建，要求 Node.js `^22.19.0 || >=24.0.0`。
 
 ## 安装与启动
 
@@ -25,6 +25,20 @@ dsh --profile web
 仓库包含可加载的 Host、Client 和 Typert `lib/` 产物，安装时不依赖 `prepare` 构建。若包管理器要求批准 Git dependency 的构建脚本，请按实际 profile 的 pnpm 配置处理；本包的预构建安装路径本身不需要执行源码构建。
 
 安装后打开 Settings → Usage。页面读取最近 30 个浏览器本地日历日的数据，并按提供方、模型和最近 7 天或 30 天筛选；模型明细默认隐藏提供方并按具体模型聚合，也可以开启提供方显示。Usage 导航和 Plugins 中的只读卡片只在 Host 正在提供 `usage-ledger` settings namespace 时注册；Loader 停用 Host 后，两处显示会随 namespace 镜像刷新而移除。
+
+## Ledger 存储与迁移
+
+本包将高频 `usage_ledger` domain 路由到 profile 的 SQLite backend，数据库路径为 `dshHomePath('storages/usage-ledger-v2.sqlite')`；其他 domain 仍使用 profile 的默认 backend。这样一次 call 或 cursor 更新只修改一条 SQLite 记录，不会重写完整的 JSON 账本。
+
+已有 `usage_ledger.json` 必须在重新启用插件前显式迁移；迁移工具只读取源文件、向新的 SQLite 文件执行 upsert，并拒绝覆盖已有目标，除非传入 `--merge`：
+
+```sh
+node scripts/migrate-json-to-sqlite.mjs \
+  --source /path/to/usage_ledger.json \
+  --target /path/to/usage-ledger-v2.sqlite
+```
+
+迁移成功后保留原 JSON 文件作为只读备份。不要把旧的、不兼容的 SQLite 文件直接指定为目标；需要合并已有目标时显式使用 `--merge`。
 
 卸载本包使用：
 
@@ -61,7 +75,7 @@ Host 插件硬依赖以下 Cordis 服务：
 
 可选的 `settings` 服务存在时，插件注册只读的 `usage-ledger` 设置 namespace；缺少它不影响 Host 账本。Client 依赖 Web 的 Slots、Locale、Remote Gateway、Settings namespace 镜像和 Client Runtime。
 
-`cordis.patch.yml` 不会安装 storage-domain backend、session persistence provider，也不会为自定义 profile 增加服务路由。自定义 Cordis route、scope 或 isolate 必须让本插件能够访问上述 Host 服务，并让 Client Remote Gateway 能够访问 Host Remote；否则插件不会提供完整功能。持久化能力取决于 profile 为 `storageDomain` 配置的 backend，stock Web profile 通常使用 SQLite。
+`cordis.patch.yml` 安装 SQLite backend，并只把 `usage_ledger` 路由到它；它不改变 session persistence provider，也不覆盖其他 domain 的默认 backend。自定义 Cordis route、scope 或 isolate 必须让本插件能够访问上述 Host 服务，并让 Client Remote Gateway 能够访问 Host Remote；否则插件不会提供完整功能。
 
 ## Bundle 如何替换内置 Web Usage
 
@@ -105,7 +119,7 @@ Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }
 
 ## 持久化与历史回填
 
-插件打开版本为 2 的 `usage_ledger` storage domain：
+插件打开版本为 2 的 `usage_ledger` storage domain，并通过 SQLite backend 保存：
 
 - `calls` 按 `[sessionId, session.createdAt, attemptId]` 的稳定键保存每次 provider dispatch；
 - `sessions` 保存每个 session lifecycle 的回放 cursor，以及当前和成功 attempt 的 `turn:step` 映射。
@@ -145,7 +159,8 @@ Client 注册一组由 Host capability 控制的显示贡献：`settings.section
 - Web 尚无 workspace 选择器；Remote 已支持精确 workspace 过滤。
 - Legacy session 可能显示 `unknown` route，且无法恢复源日志未记录的失败、abort、retry 或 token。
 - 页面合并展示 cache read/write，未分别绘图；也不显示价格或金额。
-- 持久化保留、清理、导出和迁移工具未实现。
+- 持久化保留、清理和导出工具未实现。
+- JSON 账本到 SQLite 的迁移是显式操作；插件不会在 Web 启动时自动读取和复制完整 JSON 文件。
 - best-effort warning 只写 Host 日志；页面没有逐 session 回填诊断。
 - 插件设置卡当前只读，没有运行时配置项。
 - 回归测试覆盖发布入口、Typert source location、Client Host-availability/late-slot/HMR 生命周期、Plugins 卡交互、Host service 生命周期、快照字段投影和 patch 文件组合；它们不替代真实 Web profile 启动测试。

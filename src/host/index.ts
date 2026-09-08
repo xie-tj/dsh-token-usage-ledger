@@ -34,13 +34,13 @@ export {
   usageLedgerDomainSpec,
   usageLedgerSessionRowSchema,
 } from './spec.ts'
-export type { UsageAttemptId } from './event-types.ts'
 export type {
   UsageLedgerAttemptOutcome,
   UsageLedgerCallRow,
   UsageLedgerSessionRow,
   UsageLedgerTokenUsage,
 } from './spec.ts'
+export type { UsageAttemptId } from './event-types.ts'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {

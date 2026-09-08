@@ -1,5 +1,6 @@
 /** Browser-side Usage Settings page and Plugins configuration card. */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 // Type-only: pulls the settings slot declarations into this compilation unit.
 import type { SettingsDescribeFace } from '@deepseek-ai/dsh-client-ui-settings/client'
 // Type-only: pulls the Plugins configuration card slot declaration into this compilation unit.
@@ -14,11 +15,6 @@ import { installUsageStyles, UsageDashboard } from './UsageDashboard.tsx'
 import type { UsageDashboardInjected } from './UsageDashboard.tsx'
 import { installUsagePluginCardStyles, UsagePluginCard } from './UsagePluginCard.tsx'
 import { en, zh, type UsageLocaleKey } from './locales.ts'
-
-/** The generated Remote result envelope used by the usage ledger. */
-type RemoteResult<T> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
 
 /** Dictionary namespace owned by this package. */
 const NS = 'settings.usage'

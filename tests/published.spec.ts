@@ -80,6 +80,7 @@ describe('published package', () => {
       'lib/types/types.d.ts',
       'lib/types/types.js',
       'package.json',
+      'scripts/migrate-json-to-sqlite.mjs',
     ].sort())
   }, 30_000)
 })

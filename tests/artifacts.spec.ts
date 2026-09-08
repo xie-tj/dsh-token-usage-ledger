@@ -65,11 +65,9 @@ describe('published Host artifacts', () => {
 describe('bundle composition', () => {
   it('disables only known built-in Web rows and inserts one external replacement', async () => {
     const patchText = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
-    const patch = parseYaml(patchText) as readonly PatchOperation[]
+    const patch = parseYaml(patchText.replaceAll('!!js ', '')) as readonly PatchOperation[]
     const storageConfig = {
-      backend: 'sqlite',
-      routes: { usage_ledger: 'sqlite', sessions: 'sqlite' },
-      scope: 'profile',
+      backend: 'json',
     }
     const profile: readonly ProfileRow[] = [
       { id: 'storage-domain', name: '@deepseek-ai/dsh-storage-domain', config: storageConfig },
@@ -77,11 +75,15 @@ describe('bundle composition', () => {
       { id: 'ui-settings-usage', name: '@deepseek-ai/dsh-client-ui-settings-usage' },
     ]
     const composed = applyPatch(profile, patch)
-    expect(composed.find(row => row.id === 'storage-domain')?.config).toEqual(storageConfig)
+    expect(composed.find(row => row.id === 'storage-domain')?.config).toEqual({
+      ...storageConfig,
+      routes: { usage_ledger: 'sqlite' },
+    })
+    expect(composed.filter(row => row.name === '@deepseek-ai/dsh-storage-sqlite')).toHaveLength(1)
     expect(composed.filter(row => row.id === 'usage-ledger' && row.disabled).length).toBe(1)
     expect(composed.filter(row => row.id === 'ui-settings-usage' && row.disabled).length).toBe(1)
     expect(composed.filter(row => row.name === 'dsh-plugin-usage-ledger')).toHaveLength(1)
     expect(applyPatch(profile.slice(0, 1), patch).filter(row => row.name === 'dsh-plugin-usage-ledger')).toHaveLength(1)
-    expect(patchText).not.toContain('storage-domain:')
+    expect(patchText).toContain('usage-ledger-v2.sqlite')
   })
 })
