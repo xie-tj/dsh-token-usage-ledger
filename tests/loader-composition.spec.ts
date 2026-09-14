@@ -87,7 +87,9 @@ describe('Usage Ledger Loader composition', () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-usage-ledger-loader-'))
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, "- id: support\n  name: test:usage-ledger-support\n")
-    const patch = parseYaml(await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')) as PatchOptions[]
+    const patch = parseYaml(
+      (await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')).replaceAll('!!js ', ''),
+    ) as PatchOptions[]
 
     context = new Context()
     context.baseUrl = pathToFileURL(root).href + '/'
@@ -95,6 +97,7 @@ describe('Usage Ledger Loader composition', () => {
     context.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
       ['test:usage-ledger-support', supportPlugin],
+      ['@deepseek-ai/dsh-storage-sqlite', { name: 'storage-sqlite-test-support', apply() {} }],
       ['dsh-plugin-usage-ledger', usageLedgerPlugin],
     ])
     context.loader.internal = {

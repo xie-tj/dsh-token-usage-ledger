@@ -1,4 +1,4 @@
-/** Session event vocabulary used by the usage ledger. */
+/** Compatibility event vocabulary for session versions with provider-attempt records. */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'

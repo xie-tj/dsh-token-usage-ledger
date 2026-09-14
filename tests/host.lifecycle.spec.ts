@@ -101,7 +101,7 @@ describe('UsageLedgerService lifecycle', () => {
     const fiber = ctx.plugin(UsageLedgerService)
     await fiber.await()
     await readStarted
-    const snapshotPromise = ctx.usageLedger.snapshot({ workspace: '/slow-backfill', days: 1, timeZone: 'UTC' })
+    const snapshotPromise = ctx.usageLedger.snapshot({ workspace: '/slow-backfill', days: 366, timeZone: 'UTC' })
     const result = await Promise.race([
       snapshotPromise,
       new Promise<'timeout'>(resolve => setTimeout(() => { resolve('timeout') }, 100)),

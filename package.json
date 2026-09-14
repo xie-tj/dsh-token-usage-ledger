@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-usage-ledger",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Persistent model usage ledger and Web Usage dashboard for DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",
@@ -38,7 +38,8 @@
     "lib/typert.remote-client.js",
     "lib/typert.remote-client.d.ts",
     "lib/types/**/*.js",
-    "lib/types/**/*.d.ts"
+    "lib/types/**/*.d.ts",
+    "scripts/migrate-json-to-sqlite.mjs"
   ],
   "license": "MIT",
   "repository": {
@@ -77,10 +78,12 @@
     "bundle:client": "tsdown --env.DSH_BUILD_FACE client && node scripts/normalize-client.mjs",
     "build": "pnpm run clean && pnpm run typecheck:host && pnpm run bundle:host && pnpm run generate:typert && pnpm run typecheck:client && pnpm run bundle:client",
     "test": "pnpm run build && pnpm run typecheck:test && vitest run",
+    "migrate:json-to-sqlite": "node scripts/migrate-json-to-sqlite.mjs",
     "pack:check": "node scripts/check-pack.mjs"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "3.18.2",
+    "@deepseek-ai/dsh-storage-sqlite": "0.1.2-alpha.5",
     "zod": "4.4.3"
   },
   "peerDependencies": {

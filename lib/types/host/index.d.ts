@@ -7,8 +7,8 @@ import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import type { UsageLedgerSnapshot, UsageLedgerSnapshotRequest } from './types.js';
 export type * from './types.js';
 export { usageLedgerCallRowSchema, usageLedgerDomainSpec, usageLedgerSessionRowSchema, } from './spec.js';
-export type { UsageAttemptId } from './event-types.js';
 export type { UsageLedgerAttemptOutcome, UsageLedgerCallRow, UsageLedgerSessionRow, UsageLedgerTokenUsage, } from './spec.js';
+export type { UsageAttemptId } from './event-types.js';
 declare module '@deepseek-ai/cordis' {
     interface Context {
         usageLedger: UsageLedgerService;
