@@ -111,3 +111,26 @@ export interface UsageLedgerSnapshot {
   /** Per-day totals for the requested range, including zero-usage days. */
   readonly daily: readonly UsageLedgerDailyRow[]
 }
+
+/** Non-blocking background worker state shown by the Usage page. */
+export type UsageLedgerWorkerState = 'idle' | 'running' | 'paused' | 'failed'
+
+/** Read-only status returned by `usageLedgerPlugin/status`. */
+export interface UsageLedgerStatus {
+  /** Current worker state; `paused` means historical replay is unsupported/off. */
+  readonly state: UsageLedgerWorkerState
+  /** Number of recent sessions selected for automatic backfill. */
+  readonly totalSessions: number
+  /** Sessions whose reader pass has completed. */
+  readonly processedSessions: number
+  /** Logical events observed by the worker. */
+  readonly processedEvents: number
+  /** Automatic historical window in days. */
+  readonly backfillDays: number
+  /** Session currently being read, when one is active. */
+  readonly currentSessionId?: string
+  /** Most recent recoverable worker/storage error. */
+  readonly lastError?: string
+  /** Host timestamp of the status update. */
+  readonly updatedAt: string
+}

@@ -35,6 +35,7 @@ export declare const zh: {
     requestsOn: string;
     tokensOn: string;
     updated: string;
+    backfillRunning: string;
     tableModel: string;
     tableRequests: string;
     tableFailed: string;
@@ -82,6 +83,7 @@ export declare const en: {
     requestsOn: string;
     tokensOn: string;
     updated: string;
+    backfillRunning: string;
     tableModel: string;
     tableRequests: string;
     tableFailed: string;

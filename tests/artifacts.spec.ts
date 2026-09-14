@@ -28,14 +28,26 @@ function applyPatch(rows: readonly ProfileRow[], operations: readonly PatchOpera
 }
 
 describe('published Host artifacts', () => {
-  it('contains the generated Remote contract for the public snapshot method', () => {
+  it('contains generated Remote contracts for snapshot and non-blocking status', () => {
     expect(remote.package).toBe('dsh-plugin-usage-ledger')
-    expect(remote.descriptors).toHaveLength(1)
+    expect(remote.descriptors).toHaveLength(2)
+    expect(remote.descriptors).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        service: 'usageLedger',
+        namespace: 'usageLedgerPlugin',
+        method: 'snapshot',
+        sourceLocation: expect.objectContaining({ file: 'src/host/index.ts' }),
+      }),
+      expect.objectContaining({
+        service: 'usageLedger',
+        namespace: 'usageLedgerPlugin',
+        method: 'status',
+        sourceLocation: expect.objectContaining({ file: 'src/host/index.ts' }),
+      }),
+    ]))
     expect(remote.descriptors[0]).toMatchObject({
       service: 'usageLedger',
       namespace: 'usageLedgerPlugin',
-      method: 'snapshot',
-      sourceLocation: { file: 'src/host/index.ts' },
     })
   })
 
@@ -84,6 +96,6 @@ describe('bundle composition', () => {
     expect(composed.filter(row => row.id === 'ui-settings-usage' && row.disabled).length).toBe(1)
     expect(composed.filter(row => row.name === 'dsh-plugin-usage-ledger')).toHaveLength(1)
     expect(applyPatch(profile.slice(0, 1), patch).filter(row => row.name === 'dsh-plugin-usage-ledger')).toHaveLength(1)
-    expect(patchText).toContain('usage-ledger-v2.sqlite')
+    expect(patchText).toContain('usage-ledger-v3.sqlite')
   })
 })

@@ -3,14 +3,16 @@ import type {
   RemoteResult,
   TypertRemoteContribution,
 } from '@deepseek-ai/dsh-typert-protocol'
-import type { UsageLedgerSnapshot, UsageLedgerSnapshotRequest } from '../host/types.ts'
+import type { UsageLedgerSnapshot, UsageLedgerSnapshotRequest, UsageLedgerStatus } from '../host/types.ts'
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$75736167654c6564676572506c7567696e {
     snapshot: (request?: UsageLedgerSnapshotRequest) => Promise<RemoteResult<UsageLedgerSnapshot>>
+    status: () => Promise<RemoteResult<UsageLedgerStatus>>
   }
   interface TypertRemoteMap {
     'usageLedgerPlugin/snapshot': (request?: UsageLedgerSnapshotRequest) => Promise<RemoteResult<UsageLedgerSnapshot>>
+    'usageLedgerPlugin/status': () => Promise<RemoteResult<UsageLedgerStatus>>
   }
   interface TypertRemoteNamespaceMap {
     'usageLedgerPlugin': TypertRemoteNamespace$75736167654c6564676572506c7567696e
@@ -73,6 +75,16 @@ const dsh_plugin_usage_ledger_usageLedgerPlugin_snapshot_result$schema = z.objec
   'unmeteredRequests': z.number().readonly(),
 })).readonly(),
 })
+const dsh_plugin_usage_ledger_usageLedgerPlugin_status_result$schema = z.object({
+  'state': z.union([z.literal("idle"), z.literal("running"), z.literal("paused"), z.literal("failed")]).readonly(),
+  'totalSessions': z.number().readonly(),
+  'processedSessions': z.number().readonly(),
+  'processedEvents': z.number().readonly(),
+  'backfillDays': z.number().readonly(),
+  'currentSessionId': z.union([z.undefined(), z.string()]).readonly().optional(),
+  'lastError': z.union([z.undefined(), z.string()]).readonly().optional(),
+  'updatedAt': z.string().readonly(),
+})
 
 export const TYPERT_REMOTE: TypertRemoteContribution = {
   package: 'dsh-plugin-usage-ledger',
@@ -101,7 +113,23 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerSnapshot',
         schema: dsh_plugin_usage_ledger_usageLedgerPlugin_snapshot_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":440,"column":9},
+      sourceLocation: {"file":"src/host/index.ts","line":457,"column":9},
+    },
+    {
+      id: 'dsh-plugin-usage-ledger#usageLedgerPlugin/status',
+      service: 'usageLedger',
+      namespace: 'usageLedgerPlugin',
+      method: 'status',
+      implementation: 'statusSnapshot',
+      invocation: { kind: 'direct' },
+      parameters: [
+      ],
+      result: {
+        mode: 'strict',
+        typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerStatus',
+        schema: dsh_plugin_usage_ledger_usageLedgerPlugin_status_result$schema,
+      },
+      sourceLocation: {"file":"src/host/index.ts","line":494,"column":3},
     },
   ],
 }

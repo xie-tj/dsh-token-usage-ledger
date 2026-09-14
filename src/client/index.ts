@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls the generated Remote Context merge into this compilation unit.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { TYPERT_REMOTE } from './generated-typert-remote.ts'
-import type { UsageLedgerSnapshot } from '../host/types.ts'
+import type { UsageLedgerSnapshot, UsageLedgerStatus } from '../host/types.ts'
 import { installUsageStyles, UsageDashboard } from './UsageDashboard.tsx'
 import type { UsageDashboardInjected } from './UsageDashboard.tsx'
 import { installUsagePluginCardStyles, UsagePluginCard } from './UsagePluginCard.tsx'
@@ -76,6 +76,13 @@ function unpackSnapshot(response: RemoteResult<UsageLedgerSnapshot> | UsageLedge
   throw new Error(`usageLedgerPlugin.snapshot failed: ${result.error.code}: ${result.error.message}`)
 }
 
+function unpackStatus(response: RemoteResult<UsageLedgerStatus> | UsageLedgerStatus): UsageLedgerStatus {
+  if (typeof response !== 'object' || response === null || !('ok' in response)) return response
+  const result = response as RemoteResult<UsageLedgerStatus>
+  if (result.ok) return result.value
+  throw new Error(`usageLedgerPlugin.status failed: ${result.error.code}: ${result.error.message}`)
+}
+
 /** Register the localized Usage displays while their Host namespace is available. */
 export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   // Stock dsh builds that already mount this namespace are reused; older builds
@@ -105,6 +112,9 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
         return unpackSnapshot(await ledger.snapshot({ days: 30, timeZone }))
       },
+      readStatus: typeof ledger.status === 'function'
+        ? async (): Promise<UsageLedgerStatus> => unpackStatus(await ledger.status())
+        : undefined,
     })
     const t = ctx.locale.bind(NS)
     const describe = ctx.settingsScope.describe()

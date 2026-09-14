@@ -31,7 +31,7 @@ afterEach(async () => {
 })
 
 describe('Usage Ledger Loader composition', () => {
-  it('loads the shipped patch and package, backfills usage, and unloads cleanly', async () => {
+  it('loads the shipped patch and package without blocking on unsupported history', async () => {
     const sessionId = SessionId('usage-ledger-loader-history')
     const eventTime = Date.UTC(2026, 1, 6, 12)
     const historical = Session.create(sessionId, [
@@ -119,12 +119,9 @@ describe('Usage Ledger Loader composition', () => {
     expect(unloaded).toEqual([])
     expect(context.get('usageLedger')).toBeDefined()
     const snapshot = await context.usageLedger.snapshot({ workspace: '/loader-composition', days: 366, timeZone: 'UTC' })
-    expect(snapshot.events).toMatchObject([{
-      provider: 'deepseek',
-      model: 'deepseek-chat',
-      inputTokens: 17,
-      outputTokens: 9,
-    }])
+    expect(snapshot.events).toEqual([])
+    await new Promise<void>(resolve => setTimeout(resolve, 50))
+    expect(context.usageLedger.statusSnapshot().state).toBe('paused')
 
     const usageEntry = [...context.loader.entries()].find(entry => entry.options.id === 'usage-ledger-plugin')
     expect(usageEntry).toBeDefined()

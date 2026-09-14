@@ -1,14 +1,12 @@
-/**
- * Host-side ledger that persists provider attempts and rebuilds usage from session history.
- * @module dsh-plugin-usage-ledger
- */
+/** Host-side Usage Ledger coordinator; heavy replay runs in a private worker. */
 import { Context, Service } from '@deepseek-ai/cordis';
+import z from '@deepseek-ai/schemastery';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
-import type { UsageLedgerSnapshot, UsageLedgerSnapshotRequest } from './types.js';
+import type { UsageLedgerSnapshot, UsageLedgerSnapshotRequest, UsageLedgerStatus } from './types.js';
 export type * from './types.js';
 export { usageLedgerCallRowSchema, usageLedgerDomainSpec, usageLedgerSessionRowSchema, } from './spec.js';
 export type { UsageLedgerAttemptOutcome, UsageLedgerCallRow, UsageLedgerSessionRow, UsageLedgerTokenUsage, } from './spec.js';
-export type { UsageAttemptId } from './event-types.js';
+export type { UsageAttemptId, UsageRequestAttemptEvent } from './event-types.js';
 declare module '@deepseek-ai/cordis' {
     interface Context {
         usageLedger: UsageLedgerService;
@@ -16,69 +14,46 @@ declare module '@deepseek-ai/cordis' {
 }
 /** Settings namespace used to expose the read-only Usage card in Plugins settings. */
 export declare const USAGE_LEDGER_SETTINGS_NAMESPACE: "usage-ledger";
-/** Host service that persists each final, failed, aborted, and retried provider call. */
+/** Enable or disable the isolated historical reader process. */
+export type UsageLedgerBackfillMode = 'process' | 'off';
+/** Runtime configuration for the background ledger coordinator. */
+export interface Config {
+    readonly backfillMode?: UsageLedgerBackfillMode;
+    readonly backfillDays?: number;
+    readonly workerMaxHeapMiB?: number;
+    readonly workerBatchEvents?: number;
+    readonly workerSliceMs?: number;
+}
+/** Host service that coordinates compact live events and isolated history replay. */
 export declare class UsageLedgerService extends TypertRemoteService {
     static inject: string[];
+    static Config: z<Config>;
+    private readonly resolvedConfig;
+    private readonly worker;
     private sessions?;
     private calls?;
-    private readonly cursors;
-    private readonly routes;
-    private readonly coldSessions;
-    private readonly tails;
-    private readonly pendingThrough;
-    private readonly scheduled;
-    private backfillPromise?;
     private accepting;
-    constructor(ctx: Context);
-    /** Open the ledger and attach lifecycle-bound post-append observers. */
+    private pendingCalls;
+    private pendingCursors;
+    private pendingDeletes;
+    private writeScheduled;
+    private writing;
+    private retryTimer;
+    private status;
+    constructor(ctx: Context, config?: Config);
+    /** Open SQLite-backed tables and install non-blocking observers. */
     protected [Service.init](): Promise<void>;
-    /** Replay cold persisted sessions without publishing them as live sessions. */
-    private backfill;
-    /**
-     * Return a bounded, read-only summary derived from idempotent call records.
-     * @param request - optional workspace, calendar-day, and timezone filters.
-     * @returns the usage snapshot after all queued session events are applied.
-     */
+    /** Start asynchronously so listing and worker startup never delay a task. */
+    private startWorker;
+    /** Return committed SQLite data immediately; backfill state is independent. */
     snapshot(request?: UsageLedgerSnapshotRequest): Promise<UsageLedgerSnapshot>;
-    /** Replay a session tail after startup or HMR, excluding a fork's inherited prefix. */
-    private adopt;
-    /** Coalesce committed events into one ordered replay; defer the cursor to flush. */
-    private schedule;
-    /** Wait until all work already observed for one session has been processed. */
-    private waitForSession;
-    /** Persist one session cursor at its durable session checkpoint. */
-    private flushSession;
-    /** Persist all cursors before the ledger domain closes. */
-    private persistCursors;
-    /** Drain all session queues before closing the ledger domain. */
-    private drainTails;
-    /** Process every missing committed event through one ordered session sequence. */
-    private processThrough;
-    /** Apply one committed event without persisting the cursor between events. */
-    private processEvent;
-    /** Record the terminal result of the official provider stream. */
-    private recordFinish;
-    /** Attach final or legacy historical usage to the step's successful attempt. */
-    private processAssistantMessage;
-    /** Create one idempotent unmetered row for the first event of a provider dispatch. */
-    private createAttempt;
-    /** Apply the route discovered after dispatch creation to its active row. */
-    private updateActiveRoute;
-    /** Terminate only unresolved attempts in the ended turn. */
-    private terminateActive;
-    /** Mark a known failed provider request when the official retry event schedules another dispatch. */
-    private processRetry;
-    /** Record official usage from an assistant stream chunk. */
-    private recordProvisionalUsage;
-    /** Replace the successful attempt's provisional metering with final message usage. */
-    private replaceFinalUsage;
-    /** Create the initial cursor immediately before this session's owned event suffix. */
-    private emptySessionRow;
-    /** Serialize one session's best-effort observer work without delaying append. */
-    private enqueue;
-    /** Return the opened lifecycle-cursor table. */
+    /** Non-blocking worker state for the Usage page. */
+    statusSnapshot(): UsageLedgerStatus;
+    private handleWorkerResponse;
+    private recordFailure;
+    private scheduleWrites;
+    private drainWrites;
     private requireSessions;
-    /** Return the opened idempotent provider-call table. */
     private requireCalls;
 }
 export default UsageLedgerService;

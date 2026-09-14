@@ -31,7 +31,7 @@
   "files": [
     "assets/usage-demo.mp4",
     "cordis.patch.yml",
-    "lib/index.js",
+    "lib/*.js",
     "lib/client.js",
     "lib/typert.host.js",
     "lib/typert.host.d.ts",
