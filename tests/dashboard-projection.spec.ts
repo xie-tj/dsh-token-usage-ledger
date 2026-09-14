@@ -12,6 +12,7 @@ describe('Usage dashboard snapshot projection', () => {
     const snapshot: UsageLedgerSnapshot = {
       workspace: null,
       days: 2,
+      all: false,
       fromDay: '2026-01-01',
       throughDay: '2026-01-02',
       timeZone: 'UTC',
@@ -28,6 +29,7 @@ describe('Usage dashboard snapshot projection', () => {
         cacheReadTokens: 13,
         cacheWriteTokens: 17,
       }],
+      eventsTruncated: false,
       models: [{
         workspace: null,
         provider: 'deepseek',
@@ -91,6 +93,7 @@ describe('Usage dashboard snapshot projection', () => {
     const snapshot = {
       workspace: null,
       days: 1,
+      all: false,
       fromDay: '2026-01-02',
       throughDay: '2026-01-02',
       timeZone: 'UTC',
@@ -103,6 +106,7 @@ describe('Usage dashboard snapshot projection', () => {
         outcome: 'failure' as const,
         retried: true,
       }],
+      eventsTruncated: false,
       models: [{
         workspace: null,
         provider: 'openai',

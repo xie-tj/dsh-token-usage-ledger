@@ -1,3 +1,7 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it, vi } from 'vitest'
@@ -7,21 +11,9 @@ import type {} from '../lib/types/host/index.js'
 // @ts-expect-error built bundle runtime entry
 import UsageLedgerService from '../lib/index.js'
 
-function table() {
-  const values = new Map<string, unknown>()
-  return {
-    get: (key: string) => values.get(key),
-    put: vi.fn(async (key: string, value: unknown) => { values.set(key, value) }),
-    delete: vi.fn(async (key: string) => { values.delete(key) }),
-    entries: () => values.entries(),
-  }
-}
-
-function setup(config: ConstructorParameters<typeof UsageLedgerService>[1] = {}) {
-  const sessionTable = table()
-  const callTable = table()
-  const close = vi.fn(async () => {})
-  const id = SessionId(`usage-ledger-live-${Math.random()}`)
+async function setup(config: ConstructorParameters<typeof UsageLedgerService>[1] = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-usage-ledger-host-'))
+  const id = SessionId('usage-ledger-live-' + Math.random())
   const session = Session.create(id, undefined, {
     version: 0,
     id,
@@ -30,96 +22,125 @@ function setup(config: ConstructorParameters<typeof UsageLedgerService>[1] = {})
     isSeeded: false,
   })
   const ctx = new Context()
-  ctx.provide('storageDomain', {
-    open: async () => ({
-      table: (name: string) => name === 'sessions' ? sessionTable : callTable,
-      close,
-    }),
-  } as never)
   ctx.provide('sessions', { list: () => [session], get: (id: SessionId) => id === session.id ? session : undefined } as never)
-  const persistence: { list: () => Promise<unknown> } = { list: vi.fn(async () => []) }
+  const persistence: {
+    list: () => Promise<unknown>
+    backgroundReaderSpec?: () => unknown
+  } = { list: vi.fn(async () => []) }
   ctx.provide('sessionPersistence', persistence as never)
   ctx.provide('settings', { register: vi.fn(() => () => {}) } as never)
-  const fiber = ctx.plugin(UsageLedgerService, config)
-  return { ctx, fiber, session, sessionTable, callTable, close, persistence }
+  const fiber = ctx.plugin(UsageLedgerService, {
+    databasePath: join(root, 'usage-ledger-v4.sqlite'),
+    backfillPowerMode: 'always',
+    ...config,
+  })
+  return {
+    ctx,
+    fiber,
+    session,
+    persistence,
+    dispose: async () => {
+      await fiber.dispose()
+      await rm(root, { recursive: true, force: true })
+    },
+  }
 }
 
-async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void> {
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 3_000): Promise<void> {
   const deadline = Date.now() + timeoutMs
-  while (!predicate() && Date.now() < deadline) await new Promise<void>(resolve => setTimeout(resolve, 20))
-  if (!predicate()) throw new Error('test condition was not observed before timeout')
+  while (!await predicate() && Date.now() < deadline) await new Promise<void>(resolve => setTimeout(resolve, 20))
+  if (!await predicate()) throw new Error('test condition was not observed before timeout')
 }
 
 describe('UsageLedgerService lifecycle', () => {
-  it('opens SQLite-backed tables and keeps disabled mode immediately idle', async () => {
-    const test = setup({ backfillMode: 'off' })
-    await test.fiber.await()
-    const snapshot = await test.ctx.usageLedger.snapshot({ days: 1, timeZone: 'UTC' })
-    expect(snapshot.events).toEqual([])
-    expect(test.ctx.usageLedger.statusSnapshot()).toMatchObject({ state: 'paused', backfillDays: 30 })
-    await test.fiber.dispose()
-    expect(test.close).toHaveBeenCalledOnce()
+  it('opens a bounded private SQLite ledger and keeps disabled mode immediately idle', async () => {
+    const test = await setup({ backfillMode: 'off' })
+    try {
+      await test.fiber.await()
+      const snapshot = await test.ctx.usageLedger.snapshot({ days: 1, timeZone: 'UTC' })
+      expect(snapshot.events).toEqual([])
+      expect(snapshot.eventsTruncated).toBe(false)
+      expect(test.ctx.usageLedger.statusSnapshot()).toMatchObject({ state: 'paused', backfillDays: 30, backfillScope: 'all' })
+    } finally {
+      await test.dispose()
+    }
   })
 
   it('does not register Usage work on the awaited session/flush barrier', async () => {
     let releaseListing!: () => void
     const listing = new Promise<void>(resolve => { releaseListing = resolve })
-    const test = setup({ backfillMode: 'process' })
+    const test = await setup({ backfillMode: 'process' })
+    test.persistence.backgroundReaderSpec = () => ({
+      protocolVersion: 1,
+      workerModule: fileURLToPath(new URL('./fixtures/worker-reader.mjs', import.meta.url)),
+      options: { events: '[]' },
+    })
     test.persistence.list = async () => { await listing; return [] }
-    await test.fiber.await()
-    const result = await Promise.race([
-      test.ctx.parallel('session/flush', test.session).then(() => 'resolved'),
-      new Promise<'timeout'>(resolve => setTimeout(() => { resolve('timeout') }, 100)),
-    ])
-    expect(result).toBe('resolved')
-    const snapshot = await Promise.race([
-      test.ctx.usageLedger.snapshot({ days: 1, timeZone: 'UTC' }),
-      new Promise<'timeout'>(resolve => setTimeout(() => { resolve('timeout') }, 100)),
-    ])
-    expect(snapshot).not.toBe('timeout')
-    releaseListing()
-    await test.fiber.dispose()
+    try {
+      await test.fiber.await()
+      const result = await Promise.race([
+        test.ctx.parallel('session/flush', test.session).then(() => 'resolved'),
+        new Promise<'timeout'>(resolve => setTimeout(() => { resolve('timeout') }, 100)),
+      ])
+      expect(result).toBe('resolved')
+      const snapshot = await Promise.race([
+        test.ctx.usageLedger.snapshot({ days: 1, timeZone: 'UTC' }),
+        new Promise<'timeout'>(resolve => setTimeout(() => { resolve('timeout') }, 100)),
+      ])
+      expect(snapshot).not.toBe('timeout')
+      releaseListing()
+    } finally {
+      releaseListing()
+      await test.dispose()
+    }
   })
 
   it('folds compact live usage in a child process without retaining assistant content', async () => {
-    const test = setup({ backfillMode: 'process' })
-    await test.fiber.await()
-    const now = Date.now()
-    test.ctx.emit('session/event', test.session, {
-      type: 'assistant/chunk',
-      seq: 0,
-      time: now,
-      data: {
-        turn: 0,
-        step: 0,
-        chunk: { type: 'usage', usage: { inputTokens: 7, outputTokens: 4, cacheReadTokens: 2, cacheWriteTokens: 1 } },
-      },
-    } as never)
-    await waitFor(() => test.callTable.entries().next().value !== undefined)
-    const snapshot = await test.ctx.usageLedger.snapshot({ workspace: '/live', days: 2, timeZone: 'UTC' })
-    expect(snapshot.events).toMatchObject([{
-      inputTokens: 7,
-      outputTokens: 4,
-      cacheReadTokens: 2,
-      cacheWriteTokens: 1,
-    }])
-    await test.fiber.dispose()
+    const test = await setup({ backfillMode: 'process' })
+    try {
+      await test.fiber.await()
+      const now = Date.now()
+      test.ctx.emit('session/event', test.session, {
+        type: 'assistant/chunk',
+        seq: 0,
+        time: now,
+        data: {
+          turn: 0,
+          step: 0,
+          chunk: { type: 'usage', usage: { inputTokens: 7, outputTokens: 4, cacheReadTokens: 2, cacheWriteTokens: 1 } },
+        },
+      } as never)
+      await waitFor(async () => {
+        const snapshot = await test.ctx.usageLedger.snapshot({ workspace: '/live', days: 2, timeZone: 'UTC' })
+        return snapshot.events.length === 1
+      })
+      const snapshot = await test.ctx.usageLedger.snapshot({ workspace: '/live', days: 2, timeZone: 'UTC' })
+      expect(snapshot.events).toMatchObject([{
+        inputTokens: 7,
+        outputTokens: 4,
+        cacheReadTokens: 2,
+        cacheWriteTokens: 1,
+      }])
+      const all = await test.ctx.usageLedger.snapshot({ all: true, timeZone: 'UTC' })
+      expect(all).toMatchObject({ all: true, days: 1 })
+      const exported = await test.ctx.usageLedger.exportCsv({ all: true, timeZone: 'UTC' })
+      expect(exported.rows).toBe(1)
+      expect(await readFile(exported.path, 'utf8')).toContain('inputTokens')
+    } finally {
+      await test.dispose()
+    }
   })
 
   it('keeps live mode while pausing unsupported historical persistence', async () => {
-    const test = setup({ backfillMode: 'process' })
-    test.persistence.list = vi.fn(async () => [{
-      version: 0,
-      id: SessionId('old-history'),
-      createdAt: Date.now(),
-      cwd: '/history',
-      isSeeded: false,
-    }])
-    await test.fiber.await()
-    await waitFor(() => test.ctx.usageLedger.statusSnapshot().state === 'paused')
-    expect(test.ctx.usageLedger.statusSnapshot().lastError).toContain('backgroundReaderSpec')
-    const snapshot = await test.ctx.usageLedger.snapshot({ days: 1, timeZone: 'UTC' })
-    expect(snapshot.events).toEqual([])
-    await test.fiber.dispose()
+    const test = await setup({ backfillMode: 'process' })
+    try {
+      await test.fiber.await()
+      await waitFor(() => test.ctx.usageLedger.statusSnapshot().state === 'paused')
+      expect(test.ctx.usageLedger.statusSnapshot().lastError).toContain('backgroundReaderSpec')
+      const snapshot = await test.ctx.usageLedger.snapshot({ days: 1, timeZone: 'UTC' })
+      expect(snapshot.events).toEqual([])
+    } finally {
+      await test.dispose()
+    }
   })
 })

@@ -18,6 +18,7 @@ vi.mock('../src/client/UsagePluginCard.module.css', () => ({ default: {} }))
 const snapshot: UsageLedgerSnapshot = {
   workspace: null,
   days: 1,
+  all: false,
   fromDay: '2026-01-01',
   throughDay: '2026-01-01',
   timeZone: 'UTC',
@@ -34,6 +35,7 @@ const snapshot: UsageLedgerSnapshot = {
     cacheReadTokens: 13,
     cacheWriteTokens: 17,
   }],
+  eventsTruncated: false,
   models: [{
     workspace: null,
     provider: 'deepseek',
@@ -101,11 +103,11 @@ describe('Usage dashboard GUI', () => {
       expect(container.textContent).toContain(String(manyRequests))
       expect(container.textContent).toContain('10K')
       expect(container.textContent).not.toContain('1万')
-      expect(container.textContent).not.toContain('allTime')
       const selects = [...container.querySelectorAll('select')]
       expect(selects).toHaveLength(3)
       expect([...selects[0].querySelectorAll('option')].map(option => option.textContent)).toEqual(['allProviders', 'deepseek'])
       expect([...selects[1].querySelectorAll('option')].map(option => option.textContent)).toEqual(['allModels', 'chat'])
+      expect([...selects[2].querySelectorAll('option')].map(option => option.textContent)).toEqual(['allTime', 'sevenDays', 'thirtyDays'])
       expect(container.textContent).toContain('showProvider')
       const showProvider = container.querySelector('input[type="checkbox"]')
       expect(showProvider).not.toBeNull()

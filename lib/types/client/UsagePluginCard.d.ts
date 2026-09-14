@@ -5,5 +5,5 @@ export declare function installUsagePluginCardStyles(): () => void;
 /** Props composed by the keyed plugin-card slot. */
 type UsagePluginCardProps = PropsRuntime<'settings.plugin.item'> & PropsLocale<'settings.usage'> & InjectFace<UsageDashboardInjected>;
 /** Render the Usage dashboard as a read-only expandable plugin card. */
-export declare function UsagePluginCard({ t, readSnapshot }: UsagePluginCardProps): import("react").JSX.Element;
+export declare function UsagePluginCard({ t, readSnapshot, readStatus, exportCsv }: UsagePluginCardProps): import("react").JSX.Element;
 export {};

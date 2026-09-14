@@ -8,17 +8,8 @@
   name: '@deepseek-ai/dsh-client-ui-settings-usage'
   disabled: true
 
-- id: storage-domain
-  name: '@deepseek-ai/dsh-storage-domain'
-  config:
-    backend: json
-    routes:
-      usage_ledger: sqlite
-
 - insert:
-    - id: storage-sqlite
-      name: '@deepseek-ai/dsh-storage-sqlite'
-      config:
-        path: !!js dshHomePath('storages/usage-ledger-v3.sqlite')
     - id: usage-ledger-plugin
       name: 'dsh-plugin-usage-ledger'
+      config:
+        databasePath: !!js dshHomePath('storages/usage-ledger-v4.sqlite')

@@ -7,18 +7,8 @@ import Include, { type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { load as parseYaml } from 'js-yaml'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import * as usageLedgerPlugin from 'dsh-plugin-usage-ledger'
-
-function table() {
-  const values = new Map<string, unknown>()
-  return {
-    get: (key: string) => values.get(key),
-    put: async (key: string, value: unknown) => { values.set(key, value) },
-    delete: async (key: string) => { values.delete(key) },
-    entries: () => values.entries(),
-  }
-}
 
 let context: Context | undefined
 let root: string | undefined
@@ -58,18 +48,9 @@ describe('Usage Ledger Loader composition', () => {
       cwd: '/loader-composition',
       isSeeded: false,
     })
-    const sessionTable = table()
-    const callTable = table()
-    const close = vi.fn(async () => {})
     const supportPlugin = {
       name: 'usage-ledger-test-support',
       apply(ctx: Context) {
-        ctx.provide('storageDomain', {
-          open: async () => ({
-            table: (name: string) => name === 'sessions' ? sessionTable : callTable,
-            close,
-          }),
-        } as never)
         ctx.provide('sessions', { list: () => [], get: () => undefined } as never)
         ctx.provide('sessionPersistence', {
           list: async () => [{ header: historical.header, revision: 'history' }],
@@ -87,8 +68,10 @@ describe('Usage Ledger Loader composition', () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-usage-ledger-loader-'))
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, "- id: support\n  name: test:usage-ledger-support\n")
+    const patchText = (await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8'))
+      .replace("!!js dshHomePath('storages/usage-ledger-v4.sqlite')", JSON.stringify(join(root, 'usage-ledger-v4.sqlite')))
     const patch = parseYaml(
-      (await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')).replaceAll('!!js ', ''),
+      patchText,
     ) as PatchOptions[]
 
     context = new Context()
@@ -97,7 +80,6 @@ describe('Usage Ledger Loader composition', () => {
     context.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
       ['test:usage-ledger-support', supportPlugin],
-      ['@deepseek-ai/dsh-storage-sqlite', { name: 'storage-sqlite-test-support', apply() {} }],
       ['dsh-plugin-usage-ledger', usageLedgerPlugin],
     ])
     context.loader.internal = {
@@ -128,6 +110,5 @@ describe('Usage Ledger Loader composition', () => {
     await usageEntry?.update({ disabled: true })
     await context.loader.await()
     expect(context.get('usageLedger')).toBeUndefined()
-    expect(close).toHaveBeenCalledOnce()
   })
 })

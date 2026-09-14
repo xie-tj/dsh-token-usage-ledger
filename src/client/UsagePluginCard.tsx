@@ -20,7 +20,7 @@ type UsagePluginCardProps =
   & InjectFace<UsageDashboardInjected>
 
 /** Render the Usage dashboard as a read-only expandable plugin card. */
-export function UsagePluginCard({ t, readSnapshot }: UsagePluginCardProps) {
+export function UsagePluginCard({ t, readSnapshot, readStatus, exportCsv }: UsagePluginCardProps) {
   const [open, setOpen] = useState(false)
   const bodyId = useId()
   return (
@@ -41,7 +41,7 @@ export function UsagePluginCard({ t, readSnapshot }: UsagePluginCardProps) {
       </button>
       {open ? (
         <div id={bodyId} className={css.body}>
-          <UsageDashboard t={t} readSnapshot={readSnapshot} />
+          <UsageDashboard t={t} readSnapshot={readSnapshot} readStatus={readStatus} exportCsv={exportCsv} />
         </div>
       ) : null}
     </li>

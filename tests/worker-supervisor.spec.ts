@@ -16,11 +16,17 @@ describe('UsageWorkerSupervisor', () => {
     const init: WorkerInitFrame = {
       type: 'init',
       protocolVersion: 1,
-      config: { backfillDays: 30, workerBatchEvents: 256, workerSliceMs: 25, workerMaxHeapMiB: 512 },
+      config: {
+        databasePath: ':memory:',
+        backfillScope: 'all',
+        backfillDays: 30,
+        workerBatchEvents: 256,
+        workerSliceMs: 25,
+        workerMaxHeapMiB: 512,
+        workerMaxActiveAttempts: 256,
+      },
       sessions: [],
       liveSessionIds: [],
-      cursors: [],
-      calls: [],
     }
     const supervisor = new UsageWorkerSupervisor({
       onResponse: frame => { responses.push(frame) },
