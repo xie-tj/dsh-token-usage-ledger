@@ -428,7 +428,7 @@ export class UsageLedgerService extends TypertRemoteService {
         inheritedEventCount: 0,
       })), ...liveSessions]
       const unique = new Map(sessions.map(session => [session.id, session]))
-      const frame: WorkerInitFrame = {
+      const makeInitFrame = (): WorkerInitFrame => ({
         type: 'init',
         protocolVersion: USAGE_LEDGER_WORKER_PROTOCOL,
         config: this.resolvedConfig,
@@ -437,7 +437,7 @@ export class UsageLedgerService extends TypertRemoteService {
         liveSessionIds: liveSessions.map(session => session.id),
         cursors: [...this.requireSessions().entries()].map(([sessionId, row]) => ({ sessionId, row })),
         calls: [...this.requireCalls().entries()].map(([key, row]) => ({ key, row })),
-      }
+      })
       this.status = {
         ...this.status,
         state: readerSpec === undefined ? 'paused' : 'running',
@@ -446,7 +446,7 @@ export class UsageLedgerService extends TypertRemoteService {
         ...(readerSpec === undefined ? { lastError: 'session persistence does not expose backgroundReaderSpec; historical backfill is paused' } : {}),
       }
       if (readerSpec === undefined) this.ctx.logger.warn('usage ledger: persistence has no provider-owned background reader; live ledger remains enabled')
-      this.worker.start(frame)
+      this.worker.start(makeInitFrame(), makeInitFrame)
     } catch (error: unknown) {
       this.recordFailure(`background worker initialization failed: ${error instanceof Error ? error.message : String(error)}`)
     }

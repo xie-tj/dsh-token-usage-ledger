@@ -19,13 +19,15 @@ export declare class UsageWorkerSupervisor {
     private stopping;
     private restartTimer;
     private restartDelay;
+    private refreshInit;
+    private restarting;
     private readonly pendingLive;
     private readonly pendingControl;
     private exitPromise;
     private resolveExit;
     constructor(callbacks: WorkerSupervisorCallbacks, workerPath?: string);
     /** Start or replace the child with a complete initialization snapshot. */
-    start(frame: WorkerInitFrame): void;
+    start(frame: WorkerInitFrame, refreshInit?: () => WorkerInitFrame): void;
     /** Send one compact live event, merging it when stdin applies backpressure. */
     sendLive(frame: WorkerLiveFrame): void;
     /** Send a control frame, also coalesced per session while the pipe is full. */
