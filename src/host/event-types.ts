@@ -1,52 +1,19 @@
-/**
- * Provider-attempt event types consumed by the usage ledger.
- *
- * The ledger reads only the durable fields it stores and does not augment
- * `SessionEventMap`, so it accepts the core record when that record is present.
- * @module dsh-plugin-usage-ledger/event-types
- */
+/** Compatibility event vocabulary for session versions with provider-attempt records. */
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { LlmFailure } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
 
-/** Opaque identity shared by the start and terminal records of one provider request. */
+/** Opaque provider-dispatch identity used by persisted ledger rows. */
 export type UsageAttemptId = Branded<'RequestAttemptId'>
 
-/** Start or terminal record for one provider request attempt. */
-export type UsageRequestAttemptEventData =
-  | {
-    readonly attemptId: UsageAttemptId
-    readonly turn: number
-    readonly step: number
-    readonly provider: string
-    readonly model: string
-    readonly phase: 'start'
-    readonly startedAt: number
-  }
-  | {
-    readonly attemptId: UsageAttemptId
-    readonly turn: number
-    readonly step: number
-    readonly provider: string
-    readonly model: string
-    readonly phase: 'end'
-    readonly startedAt: number
-    readonly outcome: 'success' | 'failure' | 'aborted'
-    readonly failure?: LlmFailure
-  }
-
-/** Session events understood by the ledger, including a provider request attempt. */
-export type UsageSessionEvent = SessionEvent | {
-  readonly type: 'llm/request-attempt'
-  readonly data: UsageRequestAttemptEventData
-}
-
 /**
- * Brand a legacy synthetic attempt id used when a historical log lacks attempt records.
- * @param value - Stable synthetic request-attempt identifier.
- * @returns The same identifier with its attempt-id brand.
+ * Attach the provider-attempt brand to an identifier derived by this plugin.
+ * @param value - Stable identifier from an official session event.
+ * @returns The same identifier with its compile-time domain brand.
  */
 export function createUsageAttemptId(value: string): UsageAttemptId {
   return value as UsageAttemptId
 }
+
+/** Session events produced by the supported DSH event vocabulary. */
+export type UsageSessionEvent = SessionEvent

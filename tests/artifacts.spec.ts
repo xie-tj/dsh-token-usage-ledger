@@ -63,7 +63,7 @@ describe('published Host artifacts', () => {
 })
 
 describe('bundle composition', () => {
-  it('disables only known built-in Web rows and inserts one external replacement', async () => {
+  it('disables optional stock rows, routes ledger storage to SQLite, and inserts one replacement', async () => {
     const patchText = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
     const patch = parseYaml(patchText.replaceAll('!!js ', '')) as readonly PatchOperation[]
     const storageConfig = {

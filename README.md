@@ -10,7 +10,7 @@
 - 灵活筛选：支持提供方、模型和最近 7 天／30 天筛选，模型明细默认按具体模型聚合；
 - 缓存可见：单独展示缓存命中 token，并保留失败、未计量和重试请求。
 
-当前版本按 `@deepseek-ai/dsh` `0.1.1-rc.2` 依赖线构建，要求 Node.js `^22.19.0 || >=24.0.0`。
+当前版本按 `@deepseek-ai/dsh` `0.1.2-alpha.5` 依赖线构建，要求 Node.js `^22.19.0 || >=24.0.0`。
 
 ## 安装与启动
 
@@ -46,7 +46,7 @@ node scripts/migrate-json-to-sqlite.mjs \
 dsh plugin --profile web remove dsh-plugin-usage-ledger
 ```
 
-卸载会移除本包的 bundle、`usageLedgerPlugin` Remote 和 Client 显示贡献，但不会删除 `usage_ledger` storage domain 中的已有数据。由于 bundle 不再禁用 stock Web Usage 两行，stock Host 和 Client 随后可能恢复并显示相同的 Usage 标签；这不是本包残留，需通过 Remote namespace 和 Loader 行区分。
+卸载会移除本包的 bundle、`usageLedgerPlugin` Remote 和 Client 显示贡献，但不会删除 `usage_ledger` storage domain 中的已有数据。`cordis.patch.yml` 只在目标行存在时禁用 stock Web Usage，并为本包路由独立的 SQLite domain；若 profile 另行提供同名 Usage 实现，它们的显示由各自的 Loader 配置决定。
 
 ## 用量页面预览
 
@@ -84,7 +84,7 @@ Host 插件硬依赖以下 Cordis 服务：
 - `usage-ledger` / `@deepseek-ai/dsh-usage-ledger`；
 - `ui-settings-usage` / `@deepseek-ai/dsh-client-ui-settings-usage`。
 
-随后插入 `usage-ledger-plugin` / `dsh-plugin-usage-ledger`。目标行不存在时，patch 仍可应用。因此不要在其他位置再次挂载内置 Usage Host 或本插件，否则可能出现重复 service、Remote 或 Settings section 注册。
+随后安装 SQLite backend，并插入 `usage-ledger-plugin` / `dsh-plugin-usage-ledger`。目标行不存在时，patch 仍可应用；因此不要在其他位置再次挂载内置 Usage Host 或本插件，否则可能出现重复 service、Remote 或 Settings section 注册。
 
 Host service 名为 `usageLedger`，但本包使用独立 Remote namespace `usageLedgerPlugin`，避免与 stock `usageLedger` Remote 冲突。Client 若发现该 namespace 已挂载会复用它，否则挂载包内生成的 Typert Remote。
 
@@ -115,7 +115,7 @@ Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }
 - `timeZone` 不是 `Intl.DateTimeFormat` 接受的 IANA 时区：`RangeError: usage ledger timeZone is invalid: '<value>'`；
 - `days` 不是 1–366 的安全整数：`RangeError: usage ledger days must be a safe integer from 1 through 366`。
 
-返回值包括请求解析后的范围、生成时间、范围内的逐尝试 `events`、按 workspace/provider/model 聚合的 `models`，以及包含零用量日期的 `daily`。生成 snapshot 前，Host 会等待历史回填和已观察到的 session 队列完成。
+返回值包括请求解析后的范围、生成时间、范围内的逐尝试 `events`、按 workspace/provider/model 聚合的 `models`，以及包含零用量日期的 `daily`。生成 snapshot 前，Host 会接管 live session 并排空已观察到的 live 队列，但不会等待全部历史回填；页面先展示当前已持久化的数据，回填期间可使用刷新按钮获取新增记录。
 
 ## 持久化与历史回填
 
@@ -124,15 +124,17 @@ Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }
 - `calls` 按 `[sessionId, session.createdAt, attemptId]` 的稳定键保存每次 provider dispatch；
 - `sessions` 保存每个 session lifecycle 的回放 cursor，以及当前和成功 attempt 的 `turn:step` 映射。
 
-账本观察已提交的 `llm/request-attempt`、`llm/retry-started`、usage chunk 和 `assistant/message`。call 行独立、幂等地更新；session cursor 在 `session/flush`、历史回填结束和插件关闭时写入。session disposed 时删除 cursor，但已记录的 call 行保留用于历史统计。fork 的继承前缀不会作为新 session 用量重复计入。
+账本观察已提交的官方 usage-bearing `assistant/chunk`、`assistant/message` 以及 `llm/retry`、`llm/retry-started`。call 行独立、幂等地更新；session cursor 在 `session/flush`、历史回填结束和插件关闭时写入。session disposed 时删除 cursor，但已记录的 call 行保留用于历史统计。fork 的继承前缀不会作为新 session 用量重复计入。
 
-启动时，插件通过 `sessionPersistence.list()` 枚举历史 session。live session 直接接管；非 live session 通过 `inspect()` 建立不发布到 session registry 的临时实例并回放。冷历史按 session 串行读取、写入和释放；一个解压日志完成后才读取下一个，避免同时保留全部临时 session 的事件图。历史列表读取失败会记录 warning 并结束该次回填；单个 session 读取失败只跳过该 session。snapshot 仍可汇总成功写入的账本数据。
+启动时，插件通过 `sessionPersistence.list()` 枚举历史 session。alpha.5 的已发布声明/runtime 使用 `list(): SessionHeader[]` 加 `inspect()`，而当前 source checkout 可能使用带 revision 的 `list()` 加 `open(id, 'read')`；两者版本号相同但运行时接口不同。Host 在这一处用属性检查适配，并优先使用有界 `open`/`read`，同时校验返回 metadata、在 finally 释放 read handle。live session 直接接管；非 live session 建立不发布到 session registry 的临时实例并回放。冷历史按 session 串行读取、写入和释放；一个解压日志完成后才读取下一个，避免同时保留全部临时 session 的事件图。历史列表读取失败会记录 warning 并结束该次回填；单个 session 读取失败只跳过该 session。snapshot 仍可汇总成功写入的账本数据。fork 的继承前缀只用于推导 owned event 的 route，不作为新 session 用量计入。
 
-旧历史中没有 `llm/request-attempt` 时，带有 `assistant/message` 的 step 会使用 `legacy:<turn>:<step>` 合成 attempt。provider/model 从此前最近的 `request/header` 或 `request/context` 推导；无法推导时写为 `unknown`。这种兼容回填只能记录成功 assistant message，不能重建未持久化的失败 dispatch 或完整 retry 链。
+alpha.5 会记录 `step/start` 创建的 provider dispatch，并在 `llm/retry-started` 创建后续 attempt；官方 `assistant/chunk` usage、`assistant/message` final usage 和 `llm/retry`／`turn/end` 事件补全可用记录。provider/model 从此前最近的 `request/header` 或 `request/context` 推导；无法推导时写为 `unknown`。
+
+本包不发布 `./invariant` companion。迁移后它不再生产自有 session event，也没有两个可独立观察、必须始终一致的运行时事实：官方事件的有效性由其生产包负责，账本存储则是明确允许滞后的 best-effort 派生数据。Host service、Remote 和 Client slot 都通过各自的注册 disposer 管理，并不构成独立 invariant。
 
 ## Best-effort recovery
 
-账本观察器不会阻塞 session event append。每个 session 使用顺序队列处理；更新失败会写 warning，而不是使模型请求失败。运行期间，仍待处理的 sequence 会再次调度。稳定 call key 以及 cursor 回放使部分写入可以安全重试；重启时会从持久化 cursor 之后继续回放可用事件。读取 snapshot 会等待当前 backfill，并接管 live session、排空已观察到的队列，但不会重新尝试一次已经结束的历史 session 枚举。
+账本观察器不会阻塞 session event append。每个 session 使用顺序队列处理；更新失败会写 warning，而不是使模型请求失败。运行期间，仍待处理的 sequence 会再次调度。稳定 call key 以及 cursor 回放使部分写入可以安全重试；重启时会从持久化 cursor 之后继续回放可用事件。读取 snapshot 会接管 live session 并排空已观察到的队列，但不会等待全部历史 backfill，也不会重新尝试一次已经结束的历史 session 枚举。
 
 这是 best-effort 派生数据，不是请求事务的一部分。storage backend 持续不可用、历史 session 无法读取、进程在持久化前终止，或源 session 本身缺少必要事件时，Usage 数据可能暂时滞后或永久不完整。插件不会伪造缺失 token。
 
@@ -140,7 +142,7 @@ Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }
 
 - 一次 provider dispatch 计为一次 request；success、failure、aborted 和 retry attempt 都分别计数。仅有 start、没有 terminal event 的 attempt 显示为 `started`。
 - `retryRequests` 标记因 `llm/retry-started` 而被后续 attempt 重试的最近 failure/aborted attempt；它不是额外生成的一次请求。
-- provider/model 优先来自 `llm/request-attempt`；仅 legacy 回填使用最近的 request route。
+- provider/model 来自最近的官方 `request/header` 或 `request/context` route；无法推导时记为 `unknown`。
 - `inputTokens` 是 provider 报告的非缓存输入 token，`outputTokens` 包含 provider 报告在输出中的 reasoning token。
 - `cacheReadTokens` 与 `cacheWriteTokens` 在 API 和持久化中分开保存。Web 的 Token 流量将二者相加显示为 Cached，模型明细另外显示 `cacheReadTokens` 作为缓存命中；Input + Output + Cache Read + Cache Write 组成 Token Total。模型明细中的数值使用 K、M、B、T 紧凑单位，曲线和柱状图保留精确数字；模型明细默认按具体模型跨提供方聚合，开启提供方显示后再拆分为 provider/model 行。
 - final assistant-message usage 优先于最后一个 provisional usage chunk。两者都不存在时，该 attempt 仍计入请求数，但计为 unmetered，token 为 0。
@@ -163,7 +165,7 @@ Client 注册一组由 Host capability 控制的显示贡献：`settings.section
 - JSON 账本到 SQLite 的迁移是显式操作；插件不会在 Web 启动时自动读取和复制完整 JSON 文件。
 - best-effort warning 只写 Host 日志；页面没有逐 session 回填诊断。
 - 插件设置卡当前只读，没有运行时配置项。
-- 回归测试覆盖发布入口、Typert source location、Client Host-availability/late-slot/HMR 生命周期、Plugins 卡交互、Host service 生命周期、快照字段投影和 patch 文件组合；它们不替代真实 Web profile 启动测试。
+- 回归测试覆盖发布入口、Typert source location、Client Host-availability/late-slot/HMR 生命周期、Plugins 卡交互、Host service 生命周期、快照字段投影、官方事件 accounting 和实际 Loader composition；它们不替代真实 Web profile 启动测试。
 
 ## 验证
 

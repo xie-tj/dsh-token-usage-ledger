@@ -5,7 +5,7 @@ const PACKAGE_NAME = 'dsh-plugin-usage-ledger'
 
 const hostConfig: UserConfig = {
   name: PACKAGE_NAME,
-  entry: ['lib/types/index.js', 'lib/types/invariant.js'],
+  entry: ['lib/types/index.js'],
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',

@@ -33,9 +33,9 @@ export interface UsageLedgerCallRow {
     readonly turn: number;
     /** Owning step number. */
     readonly step: number;
-    /** Provider route supplied by `llm/request-attempt`. */
+    /** Provider route reconstructed from official request events. */
     readonly provider: string;
-    /** Provider-owned model identifier supplied by `llm/request-attempt`. */
+    /** Provider-owned model identifier reconstructed from official request events. */
     readonly model: string;
     /** Unix epoch milliseconds when the provider dispatch started. */
     readonly startedAt: number;

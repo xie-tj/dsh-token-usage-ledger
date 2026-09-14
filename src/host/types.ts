@@ -28,9 +28,9 @@ export interface UsageLedgerEvent {
 export interface UsageLedgerModelRow {
   /** Workspace path, or `null` for sessions without a workspace. */
   readonly workspace: string | null
-  /** Provider route recorded in the request-attempt event. */
+  /** Provider route recorded in the official session events. */
   readonly provider: string
-  /** Provider-owned model identifier recorded in the request-attempt event. */
+  /** Provider-owned model identifier recorded in the official session events. */
   readonly model: string
   /** Disjoint uncached input-token total. */
   readonly inputTokens: number

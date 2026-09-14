@@ -15,7 +15,7 @@ declare module '@deepseek-ai/cordis' {
     }
 }
 /** Settings namespace used to expose the read-only Usage card in Plugins settings. */
-export declare const USAGE_LEDGER_SETTINGS_NAMESPACE: import("@deepseek-ai/dsh-settings").SettingsNamespace;
+export declare const USAGE_LEDGER_SETTINGS_NAMESPACE: "usage-ledger";
 /** Host service that persists each final, failed, aborted, and retried provider call. */
 export declare class UsageLedgerService extends TypertRemoteService {
     static inject: string[];
@@ -56,17 +56,23 @@ export declare class UsageLedgerService extends TypertRemoteService {
     private processThrough;
     /** Apply one committed event without persisting the cursor between events. */
     private processEvent;
+    /** Record the terminal result of the official provider stream. */
+    private recordFinish;
     /** Attach final or legacy historical usage to the step's successful attempt. */
     private processAssistantMessage;
-    /** Create one idempotent call row or record its terminal outcome. */
-    private processAttempt;
-    /** Mark the failed attempt that a completed retry wait is about to repeat. */
-    private markRetry;
-    /** Replace one active attempt's latest provisional stream metering. */
-    private replaceProvisionalUsage;
+    /** Create one idempotent unmetered row for the first event of a provider dispatch. */
+    private createAttempt;
+    /** Apply the route discovered after dispatch creation to its active row. */
+    private updateActiveRoute;
+    /** Terminate only unresolved attempts in the ended turn. */
+    private terminateActive;
+    /** Mark a known failed provider request when the official retry event schedules another dispatch. */
+    private processRetry;
+    /** Record official usage from an assistant stream chunk. */
+    private recordProvisionalUsage;
     /** Replace the successful attempt's provisional metering with final message usage. */
     private replaceFinalUsage;
-    /** Create the initial cursor at the first live sequence after a fork prefix. */
+    /** Create the initial cursor immediately before this session's owned event suffix. */
     private emptySessionRow;
     /** Serialize one session's best-effort observer work without delaying append. */
     private enqueue;
