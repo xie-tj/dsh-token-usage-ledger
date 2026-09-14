@@ -50,6 +50,8 @@ export class UsageWorkerSupervisor {
   private stopping = false
   private restartTimer: ReturnType<typeof setTimeout> | undefined
   private restartDelay = RESTART_MIN_DELAY_MS
+  private refreshInit: (() => WorkerInitFrame) | undefined
+  private restarting = false
   private readonly pendingLive = new Map<string, WorkerLiveFrame>()
   private readonly pendingControl = new Map<string, WorkerRequestFrame>()
   private exitPromise: Promise<void> | undefined
@@ -61,8 +63,9 @@ export class UsageWorkerSupervisor {
   ) {}
 
   /** Start or replace the child with a complete initialization snapshot. */
-  start(frame: WorkerInitFrame): void {
+  start(frame: WorkerInitFrame, refreshInit?: () => WorkerInitFrame): void {
     this.initFrame = frame
+    this.refreshInit = refreshInit
     this.stopping = false
     this.spawnWorker()
   }
@@ -111,6 +114,14 @@ export class UsageWorkerSupervisor {
 
   private spawnWorker(): void {
     if (this.stopping || this.initFrame === undefined) return
+    if (this.restarting && this.refreshInit !== undefined) {
+      try {
+        this.initFrame = this.refreshInit()
+      } catch (error: unknown) {
+        this.failed(`usage ledger worker restart snapshot failed: ${error instanceof Error ? error.message : String(error)}`)
+      }
+    }
+    this.restarting = false
     const nodeArgs = [`--max-old-space-size=${String(this.initFrame.config.workerMaxHeapMiB ?? 512)}`, this.workerPath]
     const command = process.platform === 'win32' ? process.execPath : 'nice'
     const args = process.platform === 'win32'
@@ -156,6 +167,7 @@ export class UsageWorkerSupervisor {
       this.resolveExit = undefined
       if (this.stopping) return
       this.callbacks.onFailure(`usage ledger worker exited (${String(code ?? signal ?? 'unknown')})`)
+      this.restarting = true
       const delay = this.restartDelay
       this.restartDelay = Math.min(this.restartDelay * 2, RESTART_MAX_DELAY_MS)
       this.restartTimer = setTimeout(() => {
