@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { UsageLedgerSnapshot } from '../host/types.ts'
+import type { UsageLedgerSnapshot, UsageLedgerStatus } from '../host/types.ts'
 import * as styles from './UsageDashboard.module.css'
 
 const css = styles.default
@@ -66,6 +66,8 @@ interface Bucket {
 export interface UsageDashboardInjected {
   /** Read the current Host usage snapshot. */
   readSnapshot: () => Promise<UsageLedgerSnapshot>
+  /** Read non-blocking background replay state, when supported by the Host. */
+  readStatus?: () => Promise<UsageLedgerStatus>
 }
 
 /** Data and translation props consumed by the Usage dashboard in any Settings slot. */
@@ -338,7 +340,7 @@ function totalOf(row: Pick<ModelRow, 'input' | 'output' | 'cached'>): number {
 }
 
 /** Render the settings Usage dashboard with local filter and tooltip state. */
-export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactNode {
+export function UsageDashboard({ readSnapshot, readStatus, t }: UsageDashboardProps): ReactNode {
   const tooltipId = useId()
   const [state, setState] = useState<SnapshotState>({ status: 'loading', snapshot: undefined, error: undefined })
   const [request, setRequest] = useState(0)
@@ -347,6 +349,7 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
   const [period, setPeriod] = useState<Period>('30d')
   const [showProvider, setShowProvider] = useState(false)
   const [target, setTarget] = useState<ChartTarget>(undefined)
+  const [workerStatus, setWorkerStatus] = useState<UsageLedgerStatus | undefined>(undefined)
 
   useEffect(() => {
     let current = true
@@ -362,8 +365,14 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
         }))
       },
     )
+    if (readStatus !== undefined) {
+      void readStatus().then(
+        (status) => { if (current) setWorkerStatus(status) },
+        () => { if (current) setWorkerStatus(undefined) },
+      )
+    }
     return () => { current = false }
-  }, [readSnapshot, request])
+  }, [readSnapshot, readStatus, request])
 
   const snapshot = state.snapshot
   const models = useMemo(
@@ -442,6 +451,14 @@ export function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactN
 
       {state.status === 'error' ? (
         <p className={css.stale} role="status">{t('showingLastGood')}</p>
+      ) : null}
+      {workerStatus?.state === 'running' ? (
+        <p className={css.stale} role="status">
+          {interpolate(t('backfillRunning'), {
+            processed: exactCountText(workerStatus.processedSessions),
+            total: exactCountText(workerStatus.totalSessions),
+          })}
+        </p>
       ) : null}
       <p className={css.updated}>{interpolate(t('updated'), { time: snapshot.updatedAt })}</p>
 

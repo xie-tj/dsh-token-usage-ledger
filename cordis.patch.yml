@@ -19,6 +19,6 @@
     - id: storage-sqlite
       name: '@deepseek-ai/dsh-storage-sqlite'
       config:
-        path: !!js dshHomePath('storages/usage-ledger-v2.sqlite')
+        path: !!js dshHomePath('storages/usage-ledger-v3.sqlite')
     - id: usage-ledger-plugin
       name: 'dsh-plugin-usage-ledger'

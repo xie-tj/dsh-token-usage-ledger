@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react';
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
-import type { UsageLedgerSnapshot } from '../host/types.js';
+import type { UsageLedgerSnapshot, UsageLedgerStatus } from '../host/types.js';
 /** Install the dashboard stylesheet and return its disposer.
  * @returns A function that removes the installed stylesheet.
  */
@@ -52,6 +52,8 @@ interface Bucket {
 export interface UsageDashboardInjected {
     /** Read the current Host usage snapshot. */
     readSnapshot: () => Promise<UsageLedgerSnapshot>;
+    /** Read non-blocking background replay state, when supported by the Host. */
+    readStatus?: () => Promise<UsageLedgerStatus>;
 }
 /** Data and translation props consumed by the Usage dashboard in any Settings slot. */
 type UsageDashboardProps = PropsLocale<'settings.usage'> & UsageDashboardInjected;
@@ -62,5 +64,5 @@ type UsageDashboardProps = PropsLocale<'settings.usage'> & UsageDashboardInjecte
  */
 export declare function projectSnapshot(snapshot: UsageLedgerSnapshot): UsageSnapshot;
 /** Render the settings Usage dashboard with local filter and tooltip state. */
-export declare function UsageDashboard({ readSnapshot, t }: UsageDashboardProps): ReactNode;
+export declare function UsageDashboard({ readSnapshot, readStatus, t }: UsageDashboardProps): ReactNode;
 export {};

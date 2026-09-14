@@ -106,7 +106,7 @@ export const usageLedgerCallRowSchema = z.object({
 /** Versioned persistent storage layout for the usage-ledger service. */
 export const usageLedgerDomainSpec = defineDomain({
   name: 'usage_ledger',
-  version: 2,
+  version: 3,
   tables: {
     sessions: domainTable<SessionId, UsageLedgerSessionRow>(usageLedgerSessionRowSchema),
     calls: domainTable<string, UsageLedgerCallRow>(usageLedgerCallRowSchema),

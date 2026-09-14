@@ -1,10 +1,10 @@
 # dsh Usage Ledger Plugin
 
-`dsh-plugin-usage-ledger` 为 DeepSeek Harness Web profile 提供持久化用量账本和可视化 Usage 仪表盘。它记录每次 provider dispatch（包括失败与重试），保存输入、输出和缓存 token，用 session 历史回填数据，并在 Settings → Usage 中按提供方、模型和时间范围查看用量。
+`dsh-plugin-usage-ledger` 为 DeepSeek Harness Web profile 提供持久化用量账本和可视化 Usage 仪表盘。它记录每次 provider dispatch（包括失败与重试），保存输入、输出和缓存 token，并把 live 事件、历史回填和账本写入隔离到低优先级后台进程；当前任务不等待 Usage durability 或历史回放。
 
 核心能力：
 
-- 独立持久化账本：重启后保留历史，并对已有 session 执行 best-effort 回填；
+- 独立持久化账本：重启后保留历史，并由独立 worker 对最近 30 天 session 执行 best-effort 回填；
 - 精确统计：曲线、柱状图和 API 请求次数保留精确值，模型明细使用 K/M/B/T 紧凑单位；
 - 日级明细：Token 流量图表的悬停提示显示当日输入、输出、缓存和总计；
 - 灵活筛选：支持提供方、模型和最近 7 天／30 天筛选，模型明细默认按具体模型聚合；
@@ -28,17 +28,9 @@ dsh --profile web
 
 ## Ledger 存储与迁移
 
-本包将高频 `usage_ledger` domain 路由到 profile 的 SQLite backend，数据库路径为 `dshHomePath('storages/usage-ledger-v2.sqlite')`；其他 domain 仍使用 profile 的默认 backend。这样一次 call 或 cursor 更新只修改一条 SQLite 记录，不会重写完整的 JSON 账本。
+本包将高频 `usage_ledger` domain 路由到 profile 的 SQLite backend，数据库路径为 `dshHomePath('storages/usage-ledger-v3.sqlite')`；其他 domain 仍使用 profile 的默认 backend。主进程只应用 worker 产生的 call/cursor mutation，单次写入只修改 SQLite 中的记录，不会重写完整 JSON 账本。
 
-已有 `usage_ledger.json` 必须在重新启用插件前显式迁移；迁移工具只读取源文件、向新的 SQLite 文件执行 upsert，并拒绝覆盖已有目标，除非传入 `--merge`：
-
-```sh
-node scripts/migrate-json-to-sqlite.mjs \
-  --source /path/to/usage_ledger.json \
-  --target /path/to/usage-ledger-v2.sqlite
-```
-
-迁移成功后保留原 JSON 文件作为只读备份。不要把旧的、不兼容的 SQLite 文件直接指定为目标；需要合并已有目标时显式使用 `--merge`。
+v3 首次启用时从 session 日志重新统计，插件不会读取、删除或迁移已有 `usage_ledger.json` 和 `usage-ledger-v2.sqlite`；旧文件保留为只读备份。仓库中保留的旧迁移脚本不属于启动流程，也不会被 worker 调用。
 
 卸载本包使用：
 
@@ -46,7 +38,7 @@ node scripts/migrate-json-to-sqlite.mjs \
 dsh plugin --profile web remove dsh-plugin-usage-ledger
 ```
 
-卸载会移除本包的 bundle、`usageLedgerPlugin` Remote 和 Client 显示贡献，但不会删除 `usage_ledger` storage domain 中的已有数据。`cordis.patch.yml` 只在目标行存在时禁用 stock Web Usage，并为本包路由独立的 SQLite domain；若 profile 另行提供同名 Usage 实现，它们的显示由各自的 Loader 配置决定。
+卸载会移除本包的 bundle、`usageLedgerPlugin` Remote 和 Client 显示贡献，但不会删除 `usage_ledger` storage domain 中的已有数据。`cordis.patch.yml` 只在目标行存在时禁用 stock Web Usage，并为本包路由独立的 v3 SQLite domain；若 profile 另行提供同名 Usage 实现，它们的显示由各自的 Loader 配置决定。
 
 ## 用量页面预览
 
@@ -115,18 +107,20 @@ Client Usage 页面显式请求 `{ days: 30, timeZone: <浏览器 IANA 时区> }
 - `timeZone` 不是 `Intl.DateTimeFormat` 接受的 IANA 时区：`RangeError: usage ledger timeZone is invalid: '<value>'`；
 - `days` 不是 1–366 的安全整数：`RangeError: usage ledger days must be a safe integer from 1 through 366`。
 
-返回值包括请求解析后的范围、生成时间、范围内的逐尝试 `events`、按 workspace/provider/model 聚合的 `models`，以及包含零用量日期的 `daily`。生成 snapshot 前，Host 会接管 live session 并排空已观察到的 live 队列，但不会等待全部历史回填；页面先展示当前已持久化的数据，回填期间可使用刷新按钮获取新增记录。
+返回值包括请求解析后的范围、生成时间、范围内的逐尝试 `events`、按 workspace/provider/model 聚合的 `models`，以及包含零用量日期的 `daily`。snapshot 只读取当前已提交的 SQLite 数据，不等待 worker、历史回填或写入队列；页面先展示已有数据，后台统计完成后可刷新获取新增记录。
+
+另有 `usageLedgerPlugin/status` Remote，返回 `idle`、`running`、`paused` 或 `failed` 及最近 30 天处理进度和最近错误。它只用于非阻塞状态展示。
 
 ## 持久化与历史回填
 
-插件打开版本为 2 的 `usage_ledger` storage domain，并通过 SQLite backend 保存：
+插件打开版本为 3 的 `usage_ledger` storage domain，并通过 SQLite backend 保存：
 
 - `calls` 按 `[sessionId, session.createdAt, attemptId]` 的稳定键保存每次 provider dispatch；
 - `sessions` 保存每个 session lifecycle 的回放 cursor，以及当前和成功 attempt 的 `turn:step` 映射。
 
-账本观察已提交的官方 usage-bearing `assistant/chunk`、`assistant/message` 以及 `llm/retry`、`llm/retry-started`。call 行独立、幂等地更新；session cursor 在 `session/flush`、历史回填结束和插件关闭时写入。session disposed 时删除 cursor，但已记录的 call 行保留用于历史统计。fork 的继承前缀不会作为新 session 用量重复计入。
+主进程只提取 `usage`、retry、step、route 和 terminal outcome 等必要字段并投递给 worker，不跨进程传递 assistant 内容。worker 在单 session、每批最多 256 个事件、约 25ms 时间片内执行 reducer，然后返回压缩的 call/cursor mutation；主进程按小批次应用到 SQLite。session cursor 可在 worker 重启后继续使用，call key 保证重放幂等；session disposed 时删除 cursor，但已记录的 call 行保留用于历史统计。fork 的继承前缀不会作为新 session 用量重复计入。
 
-启动时，插件通过 `sessionPersistence.list()` 枚举历史 session。alpha.5 的已发布声明/runtime 使用 `list(): SessionHeader[]` 加 `inspect()`，而当前 source checkout 可能使用带 revision 的 `list()` 加 `open(id, 'read')`；两者版本号相同但运行时接口不同。Host 在这一处用属性检查适配，并优先使用有界 `open`/`read`，同时校验返回 metadata、在 finally 释放 read handle。live session 直接接管；非 live session 建立不发布到 session registry 的临时实例并回放。冷历史按 session 串行读取、写入和释放；一个解压日志完成后才读取下一个，避免同时保留全部临时 session 的事件图。历史列表读取失败会记录 warning 并结束该次回填；单个 session 读取失败只跳过该 session。snapshot 仍可汇总成功写入的账本数据。fork 的继承前缀只用于推导 owned event 的 route，不作为新 session 用量计入。
+启动时，插件只在主进程轻量枚举最近 30 天的 session header，然后把 provider-owned `backgroundReaderSpec` 和路径配置交给 worker。JSONL provider 使用一次扫描、分批解码的 streaming reader，不再通过 `read(offset, 256)` 反复完整解压同一日志。自定义 persistence 未提供该 seam 时只启用 live ledger、记录 warning，并跳过历史回填，不退回主线程全量回放。live session 始终优先；单个损坏 session、worker 崩溃或 SQLite 写失败只影响 Usage，并按状态显示和后台重试。
 
 alpha.5 会记录 `step/start` 创建的 provider dispatch，并在 `llm/retry-started` 创建后续 attempt；官方 `assistant/chunk` usage、`assistant/message` final usage 和 `llm/retry`／`turn/end` 事件补全可用记录。provider/model 从此前最近的 `request/header` 或 `request/context` 推导；无法推导时写为 `unknown`。
 
@@ -134,7 +128,7 @@ alpha.5 会记录 `step/start` 创建的 provider dispatch，并在 `llm/retry-s
 
 ## Best-effort recovery
 
-账本观察器不会阻塞 session event append。每个 session 使用顺序队列处理；更新失败会写 warning，而不是使模型请求失败。运行期间，仍待处理的 sequence 会再次调度。稳定 call key 以及 cursor 回放使部分写入可以安全重试；重启时会从持久化 cursor 之后继续回放可用事件。读取 snapshot 会接管 live session 并排空已观察到的队列，但不会等待全部历史 backfill，也不会重新尝试一次已经结束的历史 session 枚举。
+账本观察器不会注册 `session/flush` durability listener，因此 Usage 永远不进入当前任务的 flush barrier。主进程到 worker 的 IPC 在 pipe 满时按 session 合并为 high-water mark；后续 provider-backed rescan 会补齐丢失的 live 通知。worker 以低 OS 优先级、512 MiB 默认堆和时间片运行；崩溃按退避重启，SQLite mutation 失败留在有界重试队列中。读取 snapshot 只返回已提交数据，不等待历史 session 枚举或回填。
 
 这是 best-effort 派生数据，不是请求事务的一部分。storage backend 持续不可用、历史 session 无法读取、进程在持久化前终止，或源 session 本身缺少必要事件时，Usage 数据可能暂时滞后或永久不完整。插件不会伪造缺失 token。
 
@@ -162,8 +156,8 @@ Client 注册一组由 Host capability 控制的显示贡献：`settings.section
 - Legacy session 可能显示 `unknown` route，且无法恢复源日志未记录的失败、abort、retry 或 token。
 - 页面合并展示 cache read/write，未分别绘图；也不显示价格或金额。
 - 持久化保留、清理和导出工具未实现。
-- JSON 账本到 SQLite 的迁移是显式操作；插件不会在 Web 启动时自动读取和复制完整 JSON 文件。
-- best-effort warning 只写 Host 日志；页面没有逐 session 回填诊断。
+- 旧 JSON/v2 SQLite 不会自动迁移；首次 v3 账本只从 session 日志重新统计。
+- best-effort warning 会进入 Host 日志和 `status` Remote；页面只展示最近的后台状态。
 - 插件设置卡当前只读，没有运行时配置项。
 - 回归测试覆盖发布入口、Typert source location、Client Host-availability/late-slot/HMR 生命周期、Plugins 卡交互、Host service 生命周期、快照字段投影、官方事件 accounting 和实际 Loader composition；它们不替代真实 Web profile 启动测试。
 
