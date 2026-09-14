@@ -1,11 +1,4 @@
-/**
- * Pure usage-ledger reducer used by the isolated backfill worker.
- *
- * It owns only compact call/cursor state and emits idempotent mutations. The
- * Host process applies those mutations to SQLite; no session payload or
- * storage write is needed on the model-request path.
- * @module dsh-plugin-usage-ledger/reducer
- */
+/** Pure bounded reducer used by the isolated Usage Ledger worker. */
 import type { UsageSessionEvent } from './event-types.js';
 import type { UsageLedgerCallRow, UsageLedgerSessionRow } from './spec.js';
 /** Minimal session identity carried across the worker boundary. */
@@ -15,7 +8,7 @@ export interface LedgerSession {
     readonly cwd?: string;
     readonly inheritedEventCount: number;
 }
-/** One idempotent call/cursor change returned to the Host process. */
+/** One idempotent record change committed by the worker's SQLite transaction. */
 export type LedgerMutation = {
     readonly type: 'call-upsert';
     readonly key: string;
@@ -29,44 +22,41 @@ export type LedgerMutation = {
     readonly sessionId: string;
     readonly createdAt: number;
 };
-/** Serializable state used to resume a worker after a crash. */
+/** State loaded only for the session currently being reduced. */
 export interface LedgerReducerSeed {
+    readonly cursor?: UsageLedgerSessionRow | undefined;
     readonly calls?: readonly {
         readonly key: string;
         readonly row: UsageLedgerCallRow;
-    }[];
-    readonly cursors?: readonly {
-        readonly sessionId: string;
-        readonly row: UsageLedgerSessionRow;
-    }[];
+    }[] | undefined;
 }
-/** Fold one or more compact events and emit only derived storage mutations. */
+/**
+ * Fold one session at a time. The reducer retains only active attempts, so a
+ * multi-year ledger never becomes a worker heap.
+ */
 export declare class UsageLedgerReducer {
+    private readonly maxActiveAttempts;
     private readonly calls;
-    private readonly cursors;
-    private readonly routes;
-    private readonly routeTimes;
-    constructor(seed?: LedgerReducerSeed);
-    /** Return a copy of the current durable call rows for Host snapshots/tests. */
-    callEntries(): IterableIterator<[string, UsageLedgerCallRow]>;
-    /** Return the reducer cursor for one lifecycle, if one has been observed. */
-    cursor(sessionId: string): UsageLedgerSessionRow | undefined;
-    /** Return the first sequence that needs to be replayed for this lifecycle. */
+    private cursorRow;
+    constructor(seed?: LedgerReducerSeed, maxActiveAttempts?: number);
+    /** Return the cursor for the session currently loaded into this reducer. */
+    cursor(session: LedgerSession): UsageLedgerSessionRow | undefined;
+    /** Return the first sequence that needs replay for this session lifecycle. */
     resumeSeq(session: LedgerSession): number;
-    /** Apply one bounded event batch in sequence order. */
+    /** Apply one bounded event batch and return durable call/cursor changes. */
     applyBatch(session: LedgerSession, events: readonly UsageSessionEvent[]): readonly LedgerMutation[];
-    /** Remove a disposed lifecycle cursor while retaining its historical calls. */
-    dispose(session: LedgerSession): readonly LedgerMutation[];
+    /** Discard transient in-memory state after a live lifecycle is disposed. */
+    dispose(): void;
     private emptySessionRow;
     private processEvent;
     private putCall;
+    private removeCall;
     private createAttempt;
     private endAttempt;
     private updateActiveRoute;
     private recordFinish;
     private processAssistantMessage;
     private recordProvisionalUsage;
-    private replaceFinalUsage;
     private processRetry;
     private terminateActive;
 }

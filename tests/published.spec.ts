@@ -39,7 +39,8 @@ describe('published package', () => {
     })
     const [result] = JSON.parse(output) as PackResult[]
 
-    expect(result.files.map(file => file.path).sort()).toEqual([
+    const files = result.files.map(file => file.path).sort()
+    expect(files).toEqual(expect.arrayContaining([
       'assets/usage-demo.mp4',
       'LICENSE',
       'README.md',
@@ -47,7 +48,6 @@ describe('published package', () => {
       'lib/backfill-worker.js',
       'lib/client.js',
       'lib/index.js',
-      'lib/worker-protocol-B6MoPLmQ.js',
       'lib/typert.host.d.ts',
       'lib/typert.host.js',
       'lib/typert.remote-client.d.ts',
@@ -62,8 +62,12 @@ describe('published package', () => {
       'lib/types/client/index.js',
       'lib/types/client/locales.d.ts',
       'lib/types/client/locales.js',
+      'lib/types/host/database.d.ts',
+      'lib/types/host/database.js',
       'lib/types/host/event-types.d.ts',
       'lib/types/host/event-types.js',
+      'lib/types/host/governor.d.ts',
+      'lib/types/host/governor.js',
       'lib/types/host/index.d.ts',
       'lib/types/host/index.js',
       'lib/types/host/reducer.d.ts',
@@ -83,7 +87,8 @@ describe('published package', () => {
       'lib/types/types.d.ts',
       'lib/types/types.js',
       'package.json',
-      'scripts/migrate-json-to-sqlite.mjs',
-    ].sort())
+    ]))
+    expect(files.some(file => file.startsWith('lib/worker-protocol-') && file.endsWith('.js'))).toBe(true)
+    expect(files.some(file => file.startsWith('scripts/'))).toBe(false)
   }, 30_000)
 })

@@ -28,9 +28,9 @@ function applyPatch(rows: readonly ProfileRow[], operations: readonly PatchOpera
 }
 
 describe('published Host artifacts', () => {
-  it('contains generated Remote contracts for snapshot and non-blocking status', () => {
+  it('contains generated Remote contracts for snapshot, CSV export, and non-blocking status', () => {
     expect(remote.package).toBe('dsh-plugin-usage-ledger')
-    expect(remote.descriptors).toHaveLength(2)
+    expect(remote.descriptors).toHaveLength(3)
     expect(remote.descriptors).toEqual(expect.arrayContaining([
       expect.objectContaining({
         service: 'usageLedger',
@@ -42,6 +42,12 @@ describe('published Host artifacts', () => {
         service: 'usageLedger',
         namespace: 'usageLedgerPlugin',
         method: 'status',
+        sourceLocation: expect.objectContaining({ file: 'src/host/index.ts' }),
+      }),
+      expect.objectContaining({
+        service: 'usageLedger',
+        namespace: 'usageLedgerPlugin',
+        method: 'exportCsv',
         sourceLocation: expect.objectContaining({ file: 'src/host/index.ts' }),
       }),
     ]))
@@ -75,27 +81,21 @@ describe('published Host artifacts', () => {
 })
 
 describe('bundle composition', () => {
-  it('disables optional stock rows, routes ledger storage to SQLite, and inserts one replacement', async () => {
+  it('disables optional stock rows and inserts one private SQLite ledger replacement', async () => {
     const patchText = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
     const patch = parseYaml(patchText.replaceAll('!!js ', '')) as readonly PatchOperation[]
-    const storageConfig = {
-      backend: 'json',
-    }
     const profile: readonly ProfileRow[] = [
-      { id: 'storage-domain', name: '@deepseek-ai/dsh-storage-domain', config: storageConfig },
       { id: 'usage-ledger', name: '@deepseek-ai/dsh-usage-ledger' },
       { id: 'ui-settings-usage', name: '@deepseek-ai/dsh-client-ui-settings-usage' },
     ]
     const composed = applyPatch(profile, patch)
-    expect(composed.find(row => row.id === 'storage-domain')?.config).toEqual({
-      ...storageConfig,
-      routes: { usage_ledger: 'sqlite' },
-    })
-    expect(composed.filter(row => row.name === '@deepseek-ai/dsh-storage-sqlite')).toHaveLength(1)
     expect(composed.filter(row => row.id === 'usage-ledger' && row.disabled).length).toBe(1)
     expect(composed.filter(row => row.id === 'ui-settings-usage' && row.disabled).length).toBe(1)
     expect(composed.filter(row => row.name === 'dsh-plugin-usage-ledger')).toHaveLength(1)
-    expect(applyPatch(profile.slice(0, 1), patch).filter(row => row.name === 'dsh-plugin-usage-ledger')).toHaveLength(1)
-    expect(patchText).toContain('usage-ledger-v3.sqlite')
+    expect(applyPatch([], patch).filter(row => row.name === 'dsh-plugin-usage-ledger')).toHaveLength(1)
+    expect(composed.find(row => row.id === 'usage-ledger-plugin')?.config).toEqual({
+      databasePath: "dshHomePath('storages/usage-ledger-v4.sqlite')",
+    })
+    expect(patchText).toContain('usage-ledger-v4.sqlite')
   })
 })

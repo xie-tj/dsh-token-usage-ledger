@@ -10,7 +10,13 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls the generated Remote Context merge into this compilation unit.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import { TYPERT_REMOTE } from './generated-typert-remote.ts'
-import type { UsageLedgerSnapshot, UsageLedgerStatus } from '../host/types.ts'
+import type {
+  UsageLedgerExportRequest,
+  UsageLedgerExportResult,
+  UsageLedgerSnapshot,
+  UsageLedgerSnapshotRequest,
+  UsageLedgerStatus,
+} from '../host/types.ts'
 import { installUsageStyles, UsageDashboard } from './UsageDashboard.tsx'
 import type { UsageDashboardInjected } from './UsageDashboard.tsx'
 import { installUsagePluginCardStyles, UsagePluginCard } from './UsagePluginCard.tsx'
@@ -83,6 +89,13 @@ function unpackStatus(response: RemoteResult<UsageLedgerStatus> | UsageLedgerSta
   throw new Error(`usageLedgerPlugin.status failed: ${result.error.code}: ${result.error.message}`)
 }
 
+function unpackExport(response: RemoteResult<UsageLedgerExportResult> | UsageLedgerExportResult): UsageLedgerExportResult {
+  if (typeof response !== 'object' || response === null || !('ok' in response)) return response
+  const result = response as RemoteResult<UsageLedgerExportResult>
+  if (result.ok) return result.value
+  throw new Error('usageLedgerPlugin.exportCsv failed: ' + result.error.code + ': ' + result.error.message)
+}
+
 /** Register the localized Usage displays while their Host namespace is available. */
 export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   // Stock dsh builds that already mount this namespace are reused; older builds
@@ -108,12 +121,12 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     const ledger = ctx.get('remote.usageLedgerPlugin')
     if (ledger === undefined) throw new Error('dsh-usage-ledger: generated Remote namespace did not mount')
     const injected = (): UsageDashboardInjected => ({
-      readSnapshot: async (): Promise<UsageLedgerSnapshot> => {
-        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
-        return unpackSnapshot(await ledger.snapshot({ days: 30, timeZone }))
-      },
+      readSnapshot: async (request: UsageLedgerSnapshotRequest): Promise<UsageLedgerSnapshot> => unpackSnapshot(await ledger.snapshot(request)),
       readStatus: typeof ledger.status === 'function'
         ? async (): Promise<UsageLedgerStatus> => unpackStatus(await ledger.status())
+        : undefined,
+      exportCsv: typeof ledger.exportCsv === 'function'
+        ? async (request: UsageLedgerExportRequest): Promise<UsageLedgerExportResult> => unpackExport(await ledger.exportCsv(request))
         : undefined,
     })
     const t = ctx.locale.bind(NS)

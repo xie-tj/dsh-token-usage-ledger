@@ -40,11 +40,13 @@ function bench(options: { served?: boolean; remote?: boolean; ensure?: Promise<v
     snapshot: vi.fn(async () => ({
       workspace: null,
       days: 30,
+      all: false,
       fromDay: '2026-01-01',
       throughDay: '2026-01-30',
       timeZone: 'UTC',
       updatedAt: '2026-01-30T00:00:00.000Z',
       events: [],
+      eventsTruncated: false,
       models: [],
       daily: [],
     })),

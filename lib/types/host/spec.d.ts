@@ -1,10 +1,9 @@
-/** Persistent `usage_ledger` domain declaration and stored-record schemas. */
+/** Durable record types and validation schemas for the private SQLite ledger. */
 import { z } from 'zod';
-import type { SessionId } from '@deepseek-ai/dsh-session';
 import type { UsageAttemptId } from './event-types.js';
 /** Final status known for one provider request attempt. */
 export type UsageLedgerAttemptOutcome = 'success' | 'failure' | 'aborted';
-/** Lifecycle cursor plus attempt lookups required while replaying one session. */
+/** Lifecycle cursor plus the bounded live-attempt state required for one session. */
 export interface UsageLedgerSessionRow {
     /** Session header creation time, distinguishing reused session ids. */
     readonly createdAt: number;
@@ -14,8 +13,11 @@ export interface UsageLedgerSessionRow {
     readonly observedSeq: number;
     /** Open attempt id by `turn:step`. */
     readonly activeAttempts: Readonly<Record<string, UsageAttemptId>>;
-    /** Most recent successful attempt id by `turn:step`. */
-    readonly successfulAttempts: Readonly<Record<string, UsageAttemptId>>;
+    /** Latest known provider route, retained across worker restarts. */
+    readonly route?: Readonly<{
+        provider: string;
+        model: string;
+    }> | undefined;
 }
 /** One independently idempotent provider call, including provisional and final metering. */
 export interface UsageLedgerCallRow {
@@ -59,13 +61,16 @@ export interface UsageLedgerTokenUsage {
     /** Cached-input write tokens. */
     readonly cacheWriteTokens: number;
 }
-/** Zod schema for the lifecycle cursor and attempt lookup tables. */
+/** Zod schema for the lifecycle cursor and active-attempt lookup table. */
 export declare const usageLedgerSessionRowSchema: z.ZodObject<{
     createdAt: z.ZodNumber;
     workspace: z.ZodOptional<z.ZodString>;
     observedSeq: z.ZodNumber;
     activeAttempts: z.ZodRecord<z.ZodString, z.ZodPipe<z.ZodString, z.ZodTransform<UsageAttemptId, string>>>;
-    successfulAttempts: z.ZodRecord<z.ZodString, z.ZodPipe<z.ZodString, z.ZodTransform<UsageAttemptId, string>>>;
+    route: z.ZodOptional<z.ZodObject<{
+        provider: z.ZodString;
+        model: z.ZodString;
+    }, z.core.$strip>>;
 }, z.core.$strip>;
 /** Zod schema for one persisted provider attempt. */
 export declare const usageLedgerCallRowSchema: z.ZodObject<{
@@ -98,12 +103,3 @@ export declare const usageLedgerCallRowSchema: z.ZodObject<{
         cacheWriteTokens: z.ZodNumber;
     }, z.core.$strip>>;
 }, z.core.$strip>;
-/** Versioned persistent storage layout for the usage-ledger service. */
-export declare const usageLedgerDomainSpec: {
-    name: string;
-    version: number;
-    tables: {
-        sessions: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<SessionId, UsageLedgerSessionRow>;
-        calls: import("@deepseek-ai/dsh-storage-domain").DomainTableSpec<string, UsageLedgerCallRow>;
-    };
-};

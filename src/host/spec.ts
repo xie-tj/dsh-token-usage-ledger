@@ -1,15 +1,13 @@
-/** Persistent `usage_ledger` domain declaration and stored-record schemas. */
+/** Durable record types and validation schemas for the private SQLite ledger. */
 
-import { domainTable, defineDomain } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
-import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createUsageAttemptId } from './event-types.ts'
 import type { UsageAttemptId } from './event-types.ts'
 
 /** Final status known for one provider request attempt. */
 export type UsageLedgerAttemptOutcome = 'success' | 'failure' | 'aborted'
 
-/** Lifecycle cursor plus attempt lookups required while replaying one session. */
+/** Lifecycle cursor plus the bounded live-attempt state required for one session. */
 export interface UsageLedgerSessionRow {
   /** Session header creation time, distinguishing reused session ids. */
   readonly createdAt: number
@@ -19,8 +17,8 @@ export interface UsageLedgerSessionRow {
   readonly observedSeq: number
   /** Open attempt id by `turn:step`. */
   readonly activeAttempts: Readonly<Record<string, UsageAttemptId>>
-  /** Most recent successful attempt id by `turn:step`. */
-  readonly successfulAttempts: Readonly<Record<string, UsageAttemptId>>
+  /** Latest known provider route, retained across worker restarts. */
+  readonly route?: Readonly<{ provider: string; model: string }> | undefined
 }
 
 /** One independently idempotent provider call, including provisional and final metering. */
@@ -76,13 +74,13 @@ const tokenUsageSchema = z.object({
 })
 const attemptIdSchema = z.string().transform(createUsageAttemptId)
 
-/** Zod schema for the lifecycle cursor and attempt lookup tables. */
+/** Zod schema for the lifecycle cursor and active-attempt lookup table. */
 export const usageLedgerSessionRowSchema = z.object({
   createdAt: nonNegativeInteger,
   workspace: z.string().optional(),
   observedSeq: z.number().int().min(-1),
   activeAttempts: z.record(z.string(), attemptIdSchema),
-  successfulAttempts: z.record(z.string(), attemptIdSchema),
+  route: z.object({ provider: z.string(), model: z.string() }).optional(),
 })
 
 /** Zod schema for one persisted provider attempt. */
@@ -101,14 +99,4 @@ export const usageLedgerCallRowSchema = z.object({
   retryScheduled: z.boolean().optional(),
   provisionalUsage: tokenUsageSchema.optional(),
   finalUsage: tokenUsageSchema.optional(),
-})
-
-/** Versioned persistent storage layout for the usage-ledger service. */
-export const usageLedgerDomainSpec = defineDomain({
-  name: 'usage_ledger',
-  version: 3,
-  tables: {
-    sessions: domainTable<SessionId, UsageLedgerSessionRow>(usageLedgerSessionRowSchema),
-    calls: domainTable<string, UsageLedgerCallRow>(usageLedgerCallRowSchema),
-  },
 })

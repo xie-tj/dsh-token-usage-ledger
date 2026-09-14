@@ -1,11 +1,13 @@
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol';
-import type { UsageLedgerSnapshot, UsageLedgerSnapshotRequest, UsageLedgerStatus } from '../host/types.js';
+import type { UsageLedgerExportRequest, UsageLedgerExportResult, UsageLedgerSnapshot, UsageLedgerSnapshotRequest, UsageLedgerStatus } from '../host/types.js';
 declare module '@deepseek-ai/dsh-typert-protocol' {
     interface TypertRemoteNamespace$75736167654c6564676572506c7567696e {
+        exportCsv: (request?: UsageLedgerExportRequest) => Promise<RemoteResult<UsageLedgerExportResult>>;
         snapshot: (request?: UsageLedgerSnapshotRequest) => Promise<RemoteResult<UsageLedgerSnapshot>>;
         status: () => Promise<RemoteResult<UsageLedgerStatus>>;
     }
     interface TypertRemoteMap {
+        'usageLedgerPlugin/exportCsv': (request?: UsageLedgerExportRequest) => Promise<RemoteResult<UsageLedgerExportResult>>;
         'usageLedgerPlugin/snapshot': (request?: UsageLedgerSnapshotRequest) => Promise<RemoteResult<UsageLedgerSnapshot>>;
         'usageLedgerPlugin/status': () => Promise<RemoteResult<UsageLedgerStatus>>;
     }

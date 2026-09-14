@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react';
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
-import type { UsageLedgerSnapshot, UsageLedgerStatus } from '../host/types.js';
+import type { UsageLedgerExportRequest, UsageLedgerExportResult, UsageLedgerSnapshot, UsageLedgerSnapshotRequest, UsageLedgerStatus } from '../host/types.js';
 /** Install the dashboard stylesheet and return its disposer.
  * @returns A function that removes the installed stylesheet.
  */
@@ -51,9 +51,11 @@ interface Bucket {
 /** Dependencies supplied from the Usage plugin's apply closure. */
 export interface UsageDashboardInjected {
     /** Read the current Host usage snapshot. */
-    readSnapshot: () => Promise<UsageLedgerSnapshot>;
+    readSnapshot: (request: UsageLedgerSnapshotRequest) => Promise<UsageLedgerSnapshot>;
     /** Read non-blocking background replay state, when supported by the Host. */
     readStatus?: () => Promise<UsageLedgerStatus>;
+    /** Stream the matching ledger rows into an owner-only CSV file. */
+    exportCsv?: (request: UsageLedgerExportRequest) => Promise<UsageLedgerExportResult>;
 }
 /** Data and translation props consumed by the Usage dashboard in any Settings slot. */
 type UsageDashboardProps = PropsLocale<'settings.usage'> & UsageDashboardInjected;
@@ -64,5 +66,5 @@ type UsageDashboardProps = PropsLocale<'settings.usage'> & UsageDashboardInjecte
  */
 export declare function projectSnapshot(snapshot: UsageLedgerSnapshot): UsageSnapshot;
 /** Render the settings Usage dashboard with local filter and tooltip state. */
-export declare function UsageDashboard({ readSnapshot, readStatus, t }: UsageDashboardProps): ReactNode;
+export declare function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: UsageDashboardProps): ReactNode;
 export {};
