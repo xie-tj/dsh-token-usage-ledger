@@ -79,9 +79,18 @@ export class UsageLedgerReducer {
   private readonly calls = new Map<string, UsageLedgerCallRow>()
   private readonly cursors = new Map<string, UsageLedgerSessionRow>()
   private readonly routes = new Map<string, UsageRoute>()
+  private readonly routeTimes = new Map<string, number>()
 
   constructor(seed: LedgerReducerSeed = {}) {
-    for (const entry of seed.calls ?? []) this.calls.set(entry.key, entry.row)
+    for (const entry of seed.calls ?? []) {
+      this.calls.set(entry.key, entry.row)
+      const route = this.routes.get(entry.row.sessionId)
+      const priorTime = this.routeTimes.get(entry.row.sessionId)
+      if (route === undefined || priorTime === undefined || priorTime <= entry.row.startedAt) {
+        this.routes.set(entry.row.sessionId, { provider: entry.row.provider, model: entry.row.model })
+        this.routeTimes.set(entry.row.sessionId, entry.row.startedAt)
+      }
+    }
     for (const entry of seed.cursors ?? []) this.cursors.set(entry.sessionId, entry.row)
   }
 
@@ -93,6 +102,13 @@ export class UsageLedgerReducer {
   /** Return the reducer cursor for one lifecycle, if one has been observed. */
   cursor(sessionId: string): UsageLedgerSessionRow | undefined {
     return this.cursors.get(sessionId)
+  }
+
+  /** Return the first sequence that needs to be replayed for this lifecycle. */
+  resumeSeq(session: LedgerSession): number {
+    const stored = this.cursors.get(session.id)
+    if (!sameLifecycle(stored, session)) return session.inheritedEventCount
+    return Math.max(session.inheritedEventCount, stored.observedSeq + 1)
   }
 
   /** Apply one bounded event batch in sequence order. */
@@ -122,6 +138,7 @@ export class UsageLedgerReducer {
     const stored = this.cursors.get(session.id)
     this.cursors.delete(session.id)
     this.routes.delete(session.id)
+    this.routeTimes.delete(session.id)
     if (!sameLifecycle(stored, session)) return []
     return [{ type: 'cursor-delete', sessionId: session.id, createdAt: session.createdAt }]
   }

@@ -133,7 +133,7 @@ async function processLive(session: WorkerSession): Promise<void> {
   const ordered = [...events.entries()]
     .sort(([left], [right]) => left - right)
     .map(([, event]) => event)
-  const cursor = reducer.cursor(session.id)?.observedSeq ?? session.inheritedEventCount - 1
+  const cursor = reducer.resumeSeq(session) - 1
   const requiresReaderGapFill = reader !== undefined
   if (requiresReaderGapFill && ordered[0] !== undefined && ordered[0].seq > cursor + 1) return
   liveEvents.delete(session.id)
@@ -161,9 +161,10 @@ async function processSession(task: SessionTask): Promise<void> {
   let sliceStarted = performance.now()
   await processLive(session)
   if (reader !== undefined && !stopped) {
+    const fromSeq = reducer.resumeSeq(session)
     const batches = reader.readSessionBatches(
       init.readerSpec?.options,
-      { session: { id: session.id, ...(session.cwd === undefined ? {} : { cwd: session.cwd }) }, fromSeq: 0, batchEvents: init.config.workerBatchEvents },
+      { session: { id: session.id, ...(session.cwd === undefined ? {} : { cwd: session.cwd }) }, fromSeq, batchEvents: init.config.workerBatchEvents },
     )
     for await (const current of batches) {
       if (stopped) return
