@@ -122,7 +122,10 @@ export class UsageWorkerSupervisor {
       }
     }
     this.restarting = false
-    const nodeArgs = [`--max-old-space-size=${String(this.initFrame.config.workerMaxHeapMiB ?? 512)}`, this.workerPath]
+    const sourceReader = this.initFrame.readerSpec?.workerModule.endsWith('.ts') === true
+      ? ['--import', 'tsx/esm']
+      : []
+    const nodeArgs = ['--no-warnings', `--max-old-space-size=${String(this.initFrame.config.workerMaxHeapMiB ?? 512)}`, ...sourceReader, this.workerPath]
     const command = process.platform === 'win32' ? process.execPath : 'nice'
     const args = process.platform === 'win32'
       ? nodeArgs
@@ -151,6 +154,10 @@ export class UsageWorkerSupervisor {
         return
       }
       this.callbacks.onResponse(frame)
+      if (frame.type === 'error' && frame.fatal === true) {
+        this.stopping = true
+        child.stdin.end()
+      }
     })
     child.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString('utf8').trim()

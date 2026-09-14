@@ -1,11 +1,4 @@
-/**
- * Pure usage-ledger reducer used by the isolated backfill worker.
- *
- * It owns only compact call/cursor state and emits idempotent mutations. The
- * Host process applies those mutations to SQLite; no session payload or
- * storage write is needed on the model-request path.
- * @module dsh-plugin-usage-ledger/reducer
- */
+/** Pure bounded reducer used by the isolated Usage Ledger worker. */
 
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-llm-retry'
@@ -25,19 +18,19 @@ export interface LedgerSession {
   readonly inheritedEventCount: number
 }
 
-/** One idempotent call/cursor change returned to the Host process. */
+/** One idempotent record change committed by the worker's SQLite transaction. */
 export type LedgerMutation =
   | { readonly type: 'call-upsert'; readonly key: string; readonly row: UsageLedgerCallRow }
   | { readonly type: 'cursor-upsert'; readonly sessionId: string; readonly row: UsageLedgerSessionRow }
   | { readonly type: 'cursor-delete'; readonly sessionId: string; readonly createdAt: number }
 
-/** Serializable state used to resume a worker after a crash. */
+/** State loaded only for the session currently being reduced. */
 export interface LedgerReducerSeed {
-  readonly calls?: readonly { readonly key: string; readonly row: UsageLedgerCallRow }[]
-  readonly cursors?: readonly { readonly sessionId: string; readonly row: UsageLedgerSessionRow }[]
+  readonly cursor?: UsageLedgerSessionRow | undefined
+  readonly calls?: readonly { readonly key: string; readonly row: UsageLedgerCallRow }[] | undefined
 }
 
-type UsageRoute = { provider: string; model: string }
+type UsageRoute = { readonly provider: string; readonly model: string }
 type MutationSink = (mutation: LedgerMutation) => void
 
 function stepKey(turn: number, step: number): string {
@@ -74,73 +67,64 @@ function routeAfter(route: UsageRoute, event: UsageSessionEvent): UsageRoute {
   return route
 }
 
-/** Fold one or more compact events and emit only derived storage mutations. */
+/**
+ * Fold one session at a time. The reducer retains only active attempts, so a
+ * multi-year ledger never becomes a worker heap.
+ */
 export class UsageLedgerReducer {
   private readonly calls = new Map<string, UsageLedgerCallRow>()
-  private readonly cursors = new Map<string, UsageLedgerSessionRow>()
-  private readonly routes = new Map<string, UsageRoute>()
-  private readonly routeTimes = new Map<string, number>()
+  private cursorRow: UsageLedgerSessionRow | undefined
 
-  constructor(seed: LedgerReducerSeed = {}) {
-    for (const entry of seed.calls ?? []) {
-      this.calls.set(entry.key, entry.row)
-      const route = this.routes.get(entry.row.sessionId)
-      const priorTime = this.routeTimes.get(entry.row.sessionId)
-      if (route === undefined || priorTime === undefined || priorTime <= entry.row.startedAt) {
-        this.routes.set(entry.row.sessionId, { provider: entry.row.provider, model: entry.row.model })
-        this.routeTimes.set(entry.row.sessionId, entry.row.startedAt)
-      }
+  constructor(
+    seed: LedgerReducerSeed = {},
+    private readonly maxActiveAttempts = 256,
+  ) {
+    this.cursorRow = seed.cursor
+    if (Object.keys(seed.cursor?.activeAttempts ?? {}).length > maxActiveAttempts) {
+      throw new Error('usage ledger session active attempt count exceeds workerMaxActiveAttempts')
     }
-    for (const entry of seed.cursors ?? []) this.cursors.set(entry.sessionId, entry.row)
+    for (const entry of seed.calls ?? []) this.calls.set(entry.key, entry.row)
   }
 
-  /** Return a copy of the current durable call rows for Host snapshots/tests. */
-  callEntries(): IterableIterator<[string, UsageLedgerCallRow]> {
-    return this.calls.entries()
+  /** Return the cursor for the session currently loaded into this reducer. */
+  cursor(session: LedgerSession): UsageLedgerSessionRow | undefined {
+    return sameLifecycle(this.cursorRow, session) ? this.cursorRow : undefined
   }
 
-  /** Return the reducer cursor for one lifecycle, if one has been observed. */
-  cursor(sessionId: string): UsageLedgerSessionRow | undefined {
-    return this.cursors.get(sessionId)
-  }
-
-  /** Return the first sequence that needs to be replayed for this lifecycle. */
+  /** Return the first sequence that needs replay for this session lifecycle. */
   resumeSeq(session: LedgerSession): number {
-    const stored = this.cursors.get(session.id)
-    if (!sameLifecycle(stored, session)) return session.inheritedEventCount
+    const stored = this.cursor(session)
+    if (stored === undefined) return session.inheritedEventCount
     return Math.max(session.inheritedEventCount, stored.observedSeq + 1)
   }
 
-  /** Apply one bounded event batch in sequence order. */
+  /** Apply one bounded event batch and return durable call/cursor changes. */
   applyBatch(session: LedgerSession, events: readonly UsageSessionEvent[]): readonly LedgerMutation[] {
     const mutations: LedgerMutation[] = []
     const sink: MutationSink = mutation => { mutations.push(mutation) }
-    const stored = this.cursors.get(session.id)
-    let current = sameLifecycle(stored, session) ? stored : this.emptySessionRow(session)
-    let route = this.routes.get(session.id) ?? { provider: 'unknown', model: 'unknown' }
+    let current = this.cursor(session) ?? this.emptySessionRow(session)
+    let route: UsageRoute = current.route ?? { provider: 'unknown', model: 'unknown' }
     const previousObserved = current.observedSeq
 
     for (const event of events) {
-      route = routeAfter(route, event)
       if (event.seq < session.inheritedEventCount || event.seq <= current.observedSeq) continue
-      current = { ...this.processEvent(session, current, event, route, sink), observedSeq: event.seq }
+      route = routeAfter(route, event)
+      current = {
+        ...this.processEvent(session, current, event, route, sink),
+        observedSeq: event.seq,
+        route,
+      }
     }
-    this.routes.set(session.id, route)
     if (current.observedSeq !== previousObserved) {
-      this.cursors.set(session.id, current)
+      this.cursorRow = current
       sink({ type: 'cursor-upsert', sessionId: session.id, row: current })
     }
     return mutations
   }
 
-  /** Remove a disposed lifecycle cursor while retaining its historical calls. */
-  dispose(session: LedgerSession): readonly LedgerMutation[] {
-    const stored = this.cursors.get(session.id)
-    this.cursors.delete(session.id)
-    this.routes.delete(session.id)
-    this.routeTimes.delete(session.id)
-    if (!sameLifecycle(stored, session)) return []
-    return [{ type: 'cursor-delete', sessionId: session.id, createdAt: session.createdAt }]
+  /** Discard transient in-memory state after a live lifecycle is disposed. */
+  dispose(): void {
+    this.calls.clear()
   }
 
   private emptySessionRow(session: LedgerSession): UsageLedgerSessionRow {
@@ -149,7 +133,6 @@ export class UsageLedgerReducer {
       ...(session.cwd === undefined ? {} : { workspace: session.cwd }),
       observedSeq: session.inheritedEventCount - 1,
       activeAttempts: {},
-      successfulAttempts: {},
     }
   }
 
@@ -220,6 +203,10 @@ export class UsageLedgerReducer {
     sink({ type: 'call-upsert', key, row })
   }
 
+  private removeCall(session: LedgerSession, attemptId: UsageAttemptId): void {
+    this.calls.delete(callKey(session, attemptId))
+  }
+
   private createAttempt(
     session: LedgerSession,
     current: UsageLedgerSessionRow,
@@ -231,6 +218,12 @@ export class UsageLedgerReducer {
     attemptId: UsageAttemptId,
     sink: MutationSink,
   ): UsageLedgerSessionRow {
+    const stepId = stepKey(turn, step)
+    const priorAttempt = current.activeAttempts[stepId]
+    if (priorAttempt === undefined && Object.keys(current.activeAttempts).length >= this.maxActiveAttempts) {
+      throw new Error('usage ledger session active attempt count exceeds workerMaxActiveAttempts')
+    }
+    if (priorAttempt !== undefined && priorAttempt !== attemptId) this.removeCall(session, priorAttempt)
     const key = callKey(session, attemptId)
     if (this.calls.get(key) === undefined) {
       this.putCall(key, {
@@ -246,7 +239,7 @@ export class UsageLedgerReducer {
         startedAt,
       }, sink)
     }
-    return { ...current, activeAttempts: { ...current.activeAttempts, [stepKey(turn, step)]: attemptId } }
+    return { ...current, activeAttempts: { ...current.activeAttempts, [stepId]: attemptId } }
   }
 
   private endAttempt(
@@ -263,6 +256,7 @@ export class UsageLedgerReducer {
     for (const [step, active] of Object.entries(activeAttempts)) {
       if (active === attemptId) Reflect.deleteProperty(activeAttempts, step)
     }
+    this.removeCall(session, attemptId)
     return { ...current, activeAttempts }
   }
 
@@ -312,64 +306,53 @@ export class UsageLedgerReducer {
     route: UsageRoute,
     sink: MutationSink,
   ): UsageLedgerSessionRow {
-    const data = event.data as {
-      turn: number
-      step: number
-      usage?: TokenUsage
-      interrupted?: true
-    }
+    const data = event.data as { turn: number; step: number; usage?: TokenUsage; interrupted?: true }
     const step = stepKey(data.turn, data.step)
-    const attemptId = current.successfulAttempts[step] ?? current.activeAttempts[step]
+    const attemptId = current.activeAttempts[step]
     if (attemptId !== undefined) {
-      if (data.usage !== undefined) {
-        this.replaceFinalUsage(session, current, data.turn, data.step, data.usage, sink)
-      }
       const key = callKey(session, attemptId)
-      const row = this.calls.get(key)
-      if (row !== undefined) {
-        const next = this.calls.get(key) ?? row
-        const outcome = row.outcome ?? (data.interrupted === true ? 'aborted' : 'success')
-        this.putCall(key, { ...next, outcome }, sink)
-      }
-      const activeAttempts = { ...current.activeAttempts }
-      Reflect.deleteProperty(activeAttempts, step)
-      return {
-        ...current,
-        activeAttempts,
-        successfulAttempts: data.interrupted === true
-          ? current.successfulAttempts
-          : { ...current.successfulAttempts, [step]: attemptId },
-      }
-    }
-
-    const legacy = legacyAttemptId(data.turn, data.step)
-    const key = callKey(session, legacy)
-    const existing = this.calls.get(key)
-    if (existing === undefined) {
-      this.putCall(key, {
+      const existing = this.calls.get(key)
+      const row = existing ?? {
         sessionId: session.id,
         createdAt: session.createdAt,
         ...(session.cwd === undefined ? {} : { workspace: session.cwd }),
         day: new Date(event.time).toISOString().slice(0, 10),
-        attemptId: legacy,
+        attemptId,
         turn: data.turn,
         step: data.step,
         provider: route.provider,
         model: route.model,
         startedAt: event.time,
-        outcome: data.interrupted === true ? 'aborted' : 'success',
-        ...(data.usage === undefined ? {} : { finalUsage: usageOf(data.usage) }),
-      }, sink)
-    } else if (existing.finalUsage === undefined && data.usage !== undefined) {
+      }
       this.putCall(key, {
-        ...existing,
-        finalUsage: usageOf(data.usage),
-        outcome: existing.outcome ?? (data.interrupted === true ? 'aborted' : 'success'),
+        ...row,
+        ...(data.usage === undefined ? {} : { finalUsage: usageOf(data.usage) }),
+        outcome: row.outcome ?? (data.interrupted === true ? 'aborted' : 'success'),
       }, sink)
+      const activeAttempts = { ...current.activeAttempts }
+      Reflect.deleteProperty(activeAttempts, step)
+      this.removeCall(session, attemptId)
+      return { ...current, activeAttempts }
     }
-    return data.interrupted === true
-      ? current
-      : { ...current, successfulAttempts: { ...current.successfulAttempts, [step]: legacy } }
+
+    const legacy = legacyAttemptId(data.turn, data.step)
+    const key = callKey(session, legacy)
+    this.putCall(key, {
+      sessionId: session.id,
+      createdAt: session.createdAt,
+      ...(session.cwd === undefined ? {} : { workspace: session.cwd }),
+      day: new Date(event.time).toISOString().slice(0, 10),
+      attemptId: legacy,
+      turn: data.turn,
+      step: data.step,
+      provider: route.provider,
+      model: route.model,
+      startedAt: event.time,
+      outcome: data.interrupted === true ? 'aborted' : 'success',
+      ...(data.usage === undefined ? {} : { finalUsage: usageOf(data.usage) }),
+    }, sink)
+    this.removeCall(session, legacy)
+    return current
   }
 
   private recordProvisionalUsage(
@@ -384,40 +367,20 @@ export class UsageLedgerReducer {
     const attemptId = current.activeAttempts[step] ?? createUsageAttemptId(`stream:${event.data.turn}:${event.data.step}:${event.seq}`)
     const key = callKey(session, attemptId)
     const existing = this.calls.get(key)
-    if (existing === undefined) {
-      this.putCall(key, {
-        sessionId: session.id,
-        createdAt: session.createdAt,
-        ...(session.cwd === undefined ? {} : { workspace: session.cwd }),
-        day: new Date(event.time).toISOString().slice(0, 10),
-        attemptId,
-        turn: event.data.turn,
-        step: event.data.step,
-        provider: route.provider,
-        model: route.model,
-        startedAt: event.time,
-        provisionalUsage: usageOf(usage),
-      }, sink)
-    } else {
-      this.putCall(key, { ...existing, provisionalUsage: usageOf(usage) }, sink)
+    const row = existing ?? {
+      sessionId: session.id,
+      createdAt: session.createdAt,
+      ...(session.cwd === undefined ? {} : { workspace: session.cwd }),
+      day: new Date(event.time).toISOString().slice(0, 10),
+      attemptId,
+      turn: event.data.turn,
+      step: event.data.step,
+      provider: route.provider,
+      model: route.model,
+      startedAt: event.time,
     }
+    this.putCall(key, { ...row, provisionalUsage: usageOf(usage) }, sink)
     return { ...current, activeAttempts: { ...current.activeAttempts, [step]: attemptId } }
-  }
-
-  private replaceFinalUsage(
-    session: LedgerSession,
-    current: UsageLedgerSessionRow,
-    turn: number,
-    step: number,
-    usage: TokenUsage,
-    sink: MutationSink,
-  ): UsageLedgerSessionRow {
-    const attemptId = current.successfulAttempts[stepKey(turn, step)] ?? current.activeAttempts[stepKey(turn, step)]
-    if (attemptId === undefined) return current
-    const key = callKey(session, attemptId)
-    const row = this.calls.get(key)
-    if (row !== undefined) this.putCall(key, { ...row, finalUsage: usageOf(usage) }, sink)
-    return current
   }
 
   private processRetry(
@@ -426,8 +389,7 @@ export class UsageLedgerReducer {
     event: Extract<UsageSessionEvent, { type: 'llm/retry' }>,
     sink: MutationSink,
   ): UsageLedgerSessionRow {
-    const step = stepKey(event.data.turn, event.data.step)
-    const attemptId = current.activeAttempts[step]
+    const attemptId = current.activeAttempts[stepKey(event.data.turn, event.data.step)]
     if (attemptId === undefined) return current
     const key = callKey(session, attemptId)
     const row = this.calls.get(key)
@@ -448,12 +410,14 @@ export class UsageLedgerReducer {
     outcome: 'failure' | 'aborted',
     sink: MutationSink,
   ): UsageLedgerSessionRow {
-    let activeAttempts = { ...current.activeAttempts }
+    const activeAttempts = { ...current.activeAttempts }
     for (const [step, attemptId] of Object.entries(activeAttempts)) {
-      const row = this.calls.get(callKey(session, attemptId))
-      if (row === undefined || row.turn !== turn) continue
-      if (row.outcome === undefined) this.putCall(callKey(session, attemptId), { ...row, outcome }, sink)
+      if (!step.startsWith(`${String(turn)}:`)) continue
+      const key = callKey(session, attemptId)
+      const row = this.calls.get(key)
+      if (row !== undefined && row.outcome === undefined) this.putCall(key, { ...row, outcome }, sink)
       Reflect.deleteProperty(activeAttempts, step)
+      this.removeCall(session, attemptId)
     }
     return { ...current, activeAttempts }
   }

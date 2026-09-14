@@ -1,13 +1,13 @@
 /** Versioned NDJSON protocol shared by the Host supervisor and backfill worker. */
 import type { UsageSessionEvent } from './event-types.js';
-import type { UsageLedgerCallRow, UsageLedgerSessionRow } from './spec.js';
-import type { LedgerMutation } from './reducer.js';
 export declare const USAGE_LEDGER_WORKER_PROTOCOL = 1;
 /** JSON-safe provider-owned reader description (kept structural for alpha.5 peers). */
 export interface WorkerReaderSpec {
     readonly protocolVersion: number;
     readonly workerModule: string;
     readonly options?: Readonly<Record<string, boolean | number | string>>;
+    /** The worker module streams its own session headers without a Host list(). */
+    readonly supportsSessionListing?: boolean;
 }
 /** Runtime contract implemented by a provider-owned reader module. */
 export interface WorkerReaderModule {
@@ -19,6 +19,11 @@ export interface WorkerReaderModule {
         readonly fromSeq: number;
         readonly batchEvents: number;
     }, signal?: AbortSignal): AsyncIterable<WorkerReaderBatch>;
+    /** Stream stored session headers without materializing the provider's catalog. */
+    listSessionHeaders?: (options: Readonly<Record<string, boolean | number | string>> | undefined, request: {
+        readonly createdAtAfter?: number;
+        readonly createdAtBefore?: number;
+    }, signal?: AbortSignal) => AsyncIterable<WorkerListedSession>;
 }
 /** Bounded event batch returned from a provider-owned reader. */
 export interface WorkerReaderBatch {
@@ -27,6 +32,12 @@ export interface WorkerReaderBatch {
     };
     readonly inheritedEventCount: number;
     readonly events: readonly UsageSessionEvent[];
+}
+/** One stored lifecycle discovered by a provider-owned background lister. */
+export interface WorkerListedSession {
+    readonly id: string;
+    readonly createdAt: number;
+    readonly cwd?: string;
 }
 /** Compact session identity sent over IPC. */
 export interface WorkerSession {
@@ -39,22 +50,18 @@ export interface WorkerInitFrame {
     readonly type: 'init';
     readonly protocolVersion: number;
     readonly config: {
+        readonly databasePath: string;
+        readonly backfillScope: 'all' | 'recent';
         readonly backfillDays: number;
         readonly workerBatchEvents: number;
         readonly workerSliceMs: number;
         readonly workerMaxHeapMiB: number;
+        readonly workerMaxActiveAttempts: number;
     };
     readonly readerSpec?: WorkerReaderSpec;
+    /** Fallback history for providers without streaming session listing. */
     readonly sessions: readonly WorkerSession[];
     readonly liveSessionIds: readonly string[];
-    readonly cursors: readonly {
-        readonly sessionId: string;
-        readonly row: UsageLedgerSessionRow;
-    }[];
-    readonly calls: readonly {
-        readonly key: string;
-        readonly row: UsageLedgerCallRow;
-    }[];
 }
 export interface WorkerLiveFrame {
     readonly type: 'live';
@@ -72,7 +79,14 @@ export interface WorkerRescanFrame {
 export interface WorkerStopFrame {
     readonly type: 'stop';
 }
-export type WorkerRequestFrame = WorkerInitFrame | WorkerLiveFrame | WorkerDisposeFrame | WorkerRescanFrame | WorkerStopFrame;
+/** Host workload signal controlling only historical scanning, never live events. */
+export interface WorkerPaceFrame {
+    readonly type: 'pace';
+    readonly mode: 'run' | 'pause';
+    readonly delayMs: number;
+    readonly reason?: 'battery' | 'event-loop' | 'memory';
+}
+export type WorkerRequestFrame = WorkerInitFrame | WorkerLiveFrame | WorkerDisposeFrame | WorkerRescanFrame | WorkerPaceFrame | WorkerStopFrame;
 export interface WorkerProgressFrame {
     readonly type: 'progress';
     readonly status: 'idle' | 'running' | 'paused' | 'failed';
@@ -81,10 +95,6 @@ export interface WorkerProgressFrame {
     readonly processedEvents: number;
     readonly currentSessionId?: string;
     readonly backfillDays: number;
-}
-export interface WorkerMutationFrame {
-    readonly type: 'mutation';
-    readonly mutations: readonly LedgerMutation[];
 }
 export interface WorkerCheckpointFrame {
     readonly type: 'checkpoint';
@@ -101,7 +111,7 @@ export interface WorkerDoneFrame {
     readonly type: 'done';
     readonly sessionId?: string;
 }
-export type WorkerResponseFrame = WorkerProgressFrame | WorkerMutationFrame | WorkerCheckpointFrame | WorkerErrorFrame | WorkerDoneFrame;
+export type WorkerResponseFrame = WorkerProgressFrame | WorkerCheckpointFrame | WorkerErrorFrame | WorkerDoneFrame;
 /** Serialize a single protocol frame with exactly one newline. */
 export declare function encodeWorkerFrame(frame: WorkerRequestFrame | WorkerResponseFrame): string;
 /** Parse and minimally validate an incoming NDJSON frame. */

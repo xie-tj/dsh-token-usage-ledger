@@ -1,6 +1,12 @@
 import { useEffect, useId, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
-import type { UsageLedgerSnapshot, UsageLedgerStatus } from '../host/types.ts'
+import type {
+  UsageLedgerExportRequest,
+  UsageLedgerExportResult,
+  UsageLedgerSnapshot,
+  UsageLedgerSnapshotRequest,
+  UsageLedgerStatus,
+} from '../host/types.ts'
 import * as styles from './UsageDashboard.module.css'
 
 const css = styles.default
@@ -12,7 +18,7 @@ export function installUsageStyles(): () => void {
   return typeof styles.install === 'function' ? styles.install() : () => {}
 }
 
-type Period = '7d' | '30d'
+type Period = 'all' | '7d' | '30d'
 type ChartTarget = { readonly kind: 'requests' | 'tokens'; readonly index: number } | undefined
 
 interface UsageEvent {
@@ -65,9 +71,11 @@ interface Bucket {
 /** Dependencies supplied from the Usage plugin's apply closure. */
 export interface UsageDashboardInjected {
   /** Read the current Host usage snapshot. */
-  readSnapshot: () => Promise<UsageLedgerSnapshot>
+  readSnapshot: (request: UsageLedgerSnapshotRequest) => Promise<UsageLedgerSnapshot>
   /** Read non-blocking background replay state, when supported by the Host. */
   readStatus?: () => Promise<UsageLedgerStatus>
+  /** Stream the matching ledger rows into an owner-only CSV file. */
+  exportCsv?: (request: UsageLedgerExportRequest) => Promise<UsageLedgerExportResult>
 }
 
 /** Data and translation props consumed by the Usage dashboard in any Settings slot. */
@@ -339,23 +347,40 @@ function totalOf(row: Pick<ModelRow, 'input' | 'output' | 'cached'>): number {
   return row.input + row.output + row.cached
 }
 
+function snapshotRequest(period: Period, provider: string, model: string): UsageLedgerSnapshotRequest {
+  return {
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    ...(period === 'all' ? { all: true } : { days: period === '7d' ? 7 : 30 }),
+    ...(provider === 'all' ? {} : { provider }),
+    ...(model === 'all' ? {} : { model }),
+  }
+}
+
 /** Render the settings Usage dashboard with local filter and tooltip state. */
-export function UsageDashboard({ readSnapshot, readStatus, t }: UsageDashboardProps): ReactNode {
+export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: UsageDashboardProps): ReactNode {
   const tooltipId = useId()
   const [state, setState] = useState<SnapshotState>({ status: 'loading', snapshot: undefined, error: undefined })
   const [request, setRequest] = useState(0)
   const [provider, setProvider] = useState('all')
   const [model, setModel] = useState('all')
-  const [period, setPeriod] = useState<Period>('30d')
+  const [period, setPeriod] = useState<Period>('all')
   const [showProvider, setShowProvider] = useState(false)
   const [target, setTarget] = useState<ChartTarget>(undefined)
   const [workerStatus, setWorkerStatus] = useState<UsageLedgerStatus | undefined>(undefined)
+  const [catalogModels, setCatalogModels] = useState<readonly ModelRow[]>([])
+  const [exporting, setExporting] = useState(false)
+  const [exportResult, setExportResult] = useState<UsageLedgerExportResult | undefined>(undefined)
 
   useEffect(() => {
     let current = true
     setState(previous => ({ status: 'loading', snapshot: previous.snapshot, error: undefined }))
-    void readSnapshot().then(
-      (snapshot) => { if (current) setState({ status: 'ready', snapshot: projectSnapshot(snapshot), error: undefined }) },
+    void readSnapshot(snapshotRequest(period, provider, model)).then(
+      (snapshot) => {
+        if (!current) return
+        const projected = projectSnapshot(snapshot)
+        if (provider === 'all' && model === 'all' && period === 'all') setCatalogModels(projected.models)
+        setState({ status: 'ready', snapshot: projected, error: undefined })
+      },
       (error: unknown) => {
         if (!current) return
         setState(previous => ({
@@ -372,51 +397,56 @@ export function UsageDashboard({ readSnapshot, readStatus, t }: UsageDashboardPr
       )
     }
     return () => { current = false }
-  }, [readSnapshot, readStatus, request])
+  }, [model, period, provider, readSnapshot, readStatus, request])
 
   const snapshot = state.snapshot
   const models = useMemo(
     () => snapshot === undefined ? [] : [...snapshot.models].sort((left, right) => totalOf(right) - totalOf(left)),
     [snapshot],
   )
+  const catalog = catalogModels.length > 0 ? catalogModels : models
   const providers = useMemo(
-    () => [...new Set(models.map(row => row.provider))].sort(),
-    [models],
+    () => [...new Set(catalog.map(row => row.provider))].sort(),
+    [catalog],
   )
   const modelOptions = useMemo(
-    () => [...new Set(models
+    () => [...new Set(catalog
       .filter(row => provider === 'all' || row.provider === provider)
       .map(row => row.model))].sort(),
-    [models, provider],
-  )
-  const events = useMemo(
-    () => snapshot === undefined ? [] : selectedEvents(snapshot.events, provider, model, period, snapshot.throughDay),
-    [model, period, provider, snapshot],
+    [catalog, provider],
   )
   const buckets = useMemo(
-    () => snapshot === undefined ? [] : bucketsOf(events, period, snapshot.daily, snapshot.throughDay, provider === 'all' && model === 'all'),
-    [events, model, period, provider, snapshot],
+    () => snapshot === undefined ? [] : period === 'all' ? snapshot.daily.slice(-30) : snapshot.daily,
+    [period, snapshot],
   )
   const visibleModels = useMemo(
-    () => [...aggregateModels(events, showProvider)].sort((left, right) => totalOf(right) - totalOf(left)),
-    [events, showProvider],
+    () => [...(showProvider ? models : mergeModelRows(models))].sort((left, right) => totalOf(right) - totalOf(left)),
+    [models, showProvider],
   )
-  const totals = useMemo(() => events.reduce((total, event) => ({
-    requests: total.requests + 1,
-    input: total.input + event.input,
-    output: total.output + event.output,
-    cached: total.cached + event.cached,
-    cacheHit: total.cacheHit + event.cacheHit,
-    unmetered: total.unmetered + (event.metered ? 0 : 1),
-    failed: total.failed + (event.outcome === 'failure' || event.outcome === 'aborted' ? 1 : 0),
-    retried: total.retried + (event.retried ? 1 : 0),
-  }), { requests: 0, input: 0, output: 0, cached: 0, cacheHit: 0, unmetered: 0, failed: 0, retried: 0 }), [events])
+  const totals = useMemo(() => models.reduce((total, row) => ({
+    requests: total.requests + row.requests,
+    input: total.input + row.input,
+    output: total.output + row.output,
+    cached: total.cached + row.cached,
+    cacheHit: total.cacheHit + row.cacheHit,
+    unmetered: total.unmetered + row.unmetered,
+    failed: total.failed + row.failed,
+    retried: total.retried + row.retried,
+  }), { requests: 0, input: 0, output: 0, cached: 0, cacheHit: 0, unmetered: 0, failed: 0, retried: 0 }), [models])
   const curve = useMemo(() => curvePath(buckets), [buckets])
   const activeBucket = target === undefined ? undefined : buckets[target.index]
   const maxTokens = Math.max(1, ...buckets.map(bucket => bucket.input + bucket.output + bucket.cached))
   const tokenText = (value: number): string => fullNumberText(value)
 
   const refresh = (): void => { setRequest(current => current + 1) }
+  const exportLedger = (): void => {
+    if (exportCsv === undefined || exporting) return
+    setExporting(true)
+    void exportCsv(snapshotRequest(period, provider, model)).then(
+      result => { setExportResult(result); setExporting(false) },
+      () => { setExporting(false) },
+    )
+  }
   const showTarget = (next: Exclude<ChartTarget, undefined>): void => { setTarget(next) }
   const toggleTarget = (next: Exclude<ChartTarget, undefined>): void => {
     setTarget(current => current?.kind === next.kind && current.index === next.index ? undefined : next)
@@ -444,9 +474,16 @@ export function UsageDashboard({ readSnapshot, readStatus, t }: UsageDashboardPr
           <h2>{t('title')}</h2>
           <p className={css.intro}>{t('intro')}</p>
         </div>
-        <button type="button" className={css.refresh} disabled={state.status === 'loading'} onClick={refresh}>
-          {state.status === 'loading' ? t('refreshing') : t('refresh')}
-        </button>
+        <div>
+          {exportCsv === undefined ? null : (
+            <button type="button" className={css.refresh} disabled={exporting} onClick={exportLedger}>
+              {exporting ? t('exporting') : t('export')}
+            </button>
+          )}
+          <button type="button" className={css.refresh} disabled={state.status === 'loading'} onClick={refresh}>
+            {state.status === 'loading' ? t('refreshing') : t('refresh')}
+          </button>
+        </div>
       </header>
 
       {state.status === 'error' ? (
@@ -460,7 +497,13 @@ export function UsageDashboard({ readSnapshot, readStatus, t }: UsageDashboardPr
           })}
         </p>
       ) : null}
+      {workerStatus?.state === 'paused' && workerStatus.pace?.mode === 'pause' ? (
+        <p className={css.stale} role="status">{t('backfillPaused')}</p>
+      ) : null}
       <p className={css.updated}>{interpolate(t('updated'), { time: snapshot.updatedAt })}</p>
+      {exportResult === undefined ? null : (
+        <p className={css.updated}>{interpolate(t('exportSaved'), { path: exportResult.path, rows: exactCountText(exportResult.rows) })}</p>
+      )}
 
       <div className={css.filters}>
         <label>
@@ -480,13 +523,15 @@ export function UsageDashboard({ readSnapshot, readStatus, t }: UsageDashboardPr
         <label>
           <span>{t('period')}</span>
           <select value={period} onChange={(event) => { setPeriod(event.currentTarget.value as Period) }}>
+            <option value="all">{t('allTime')}</option>
             <option value="7d">{t('sevenDays')}</option>
             <option value="30d">{t('thirtyDays')}</option>
           </select>
         </label>
       </div>
+      {period === 'all' ? <p className={css.stale}>{t('allHistoryCharts')}</p> : null}
 
-      {events.length === 0 ? <p className={css.empty}>{t('noData')}</p> : (
+      {totals.requests === 0 ? <p className={css.empty}>{t('noData')}</p> : (
         <>
           <div className={css.metrics}>
             <div className={css.metricRowPrimary}>

@@ -82,8 +82,14 @@ export interface UsageLedgerSnapshotRequest {
     readonly workspace?: string | null;
     /** Number of calendar days ending today, from 1 through 366. */
     readonly days?: number;
+    /** Select every retained ledger day through today instead of a fixed window. */
+    readonly all?: boolean;
     /** IANA timezone used for the inclusive day range and daily grouping. */
     readonly timeZone?: string;
+    /** Exact provider filter, or omit to combine providers. */
+    readonly provider?: string | null;
+    /** Exact model filter, or omit to combine models. */
+    readonly model?: string | null;
 }
 /** Read-only usage summary returned by `usageLedgerPlugin/snapshot`. */
 export interface UsageLedgerSnapshot {
@@ -91,6 +97,8 @@ export interface UsageLedgerSnapshot {
     readonly workspace: string | null;
     /** Resolved inclusive calendar date range in `timeZone`. */
     readonly days: number;
+    /** Whether this response aggregates every retained day through today. */
+    readonly all: boolean;
     /** Date at the beginning of the range in `timeZone`. */
     readonly fromDay: string;
     /** Date at the end of the range in `timeZone`. */
@@ -101,10 +109,26 @@ export interface UsageLedgerSnapshot {
     readonly updatedAt: string;
     /** One attempt per provider dispatch in the requested range. */
     readonly events: readonly UsageLedgerEvent[];
+    /** Whether the bounded event detail page excludes additional matching calls. */
+    readonly eventsTruncated: boolean;
     /** Totals grouped by workspace, provider, and model. */
     readonly models: readonly UsageLedgerModelRow[];
     /** Per-day totals for the requested range, including zero-usage days. */
     readonly daily: readonly UsageLedgerDailyRow[];
+}
+/** Filters applied to a streaming CSV ledger export. */
+export interface UsageLedgerExportRequest extends UsageLedgerSnapshotRequest {
+}
+/** On-disk result of a completed bounded-memory CSV export. */
+export interface UsageLedgerExportResult {
+    /** Absolute path of the owner-only CSV file. */
+    readonly path: string;
+    /** Matching call rows written after the header row. */
+    readonly rows: number;
+    /** First calendar day included by the export. */
+    readonly fromDay: string;
+    /** Last calendar day included by the export. */
+    readonly throughDay: string;
 }
 /** Non-blocking background worker state shown by the Usage page. */
 export type UsageLedgerWorkerState = 'idle' | 'running' | 'paused' | 'failed';
@@ -120,6 +144,14 @@ export interface UsageLedgerStatus {
     readonly processedEvents: number;
     /** Automatic historical window in days. */
     readonly backfillDays: number;
+    /** Whether the worker scans all history or only the recent priority window. */
+    readonly backfillScope: 'all' | 'recent';
+    /** Current workload decision applied between historical reader slices. */
+    readonly pace?: Readonly<{
+        mode: 'run' | 'pause';
+        delayMs: number;
+        reason?: 'battery' | 'event-loop' | 'memory';
+    }>;
     /** Session currently being read, when one is active. */
     readonly currentSessionId?: string;
     /** Most recent recoverable worker/storage error. */

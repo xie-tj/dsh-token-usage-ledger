@@ -1,15 +1,27 @@
-/** Host-side Usage Ledger coordinator; heavy replay runs in a private worker. */
+/** Host-side Usage Ledger coordinator with an adaptive isolated history worker. */
 
+import { execFile } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { once } from 'node:events'
+import { createWriteStream } from 'node:fs'
+import { mkdir } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
+import { monitorEventLoopDelay, performance } from 'node:perf_hooks'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-llm-retry'
 import { Session } from '@deepseek-ai/dsh-session'
-import type { SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
-import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { TypertRemoteService, Remote } from '@deepseek-ai/dsh-typert-protocol'
-import { usageLedgerDomainSpec } from './spec.ts'
+import { UsageLedgerDatabase, openUsageLedgerDatabase } from './database.ts'
+import { UsageLedgerGovernor } from './governor.ts'
+import type {
+  UsageLedgerAdaptiveConfig,
+  UsageLedgerPace,
+  UsageLedgerPowerSource,
+} from './governor.ts'
 import type {
   UsageLedgerCallRow,
   UsageLedgerSessionRow,
@@ -17,6 +29,8 @@ import type {
 import type {
   UsageLedgerDailyRow,
   UsageLedgerEvent,
+  UsageLedgerExportRequest,
+  UsageLedgerExportResult,
   UsageLedgerModelRow,
   UsageLedgerSnapshot,
   UsageLedgerSnapshotRequest,
@@ -35,7 +49,6 @@ import { UsageWorkerSupervisor } from './supervisor.ts'
 export type * from './types.ts'
 export {
   usageLedgerCallRowSchema,
-  usageLedgerDomainSpec,
   usageLedgerSessionRowSchema,
 } from './spec.ts'
 export type {
@@ -57,6 +70,20 @@ const MAX_DAYS = 366
 const DEFAULT_BATCH_EVENTS = 256
 const DEFAULT_SLICE_MS = 25
 const DEFAULT_HEAP_MIB = 512
+const DEFAULT_MAX_ACTIVE_ATTEMPTS = 256
+const DEFAULT_EVENT_LIMIT = 256
+const DEFAULT_SCAN_BATCH_ROWS = 256
+const DEFAULT_SAMPLE_INTERVAL_MS = 2_000
+const DEFAULT_MIN_DELAY_MS = 25
+const DEFAULT_MAX_DELAY_MS = 60_000
+const DEFAULT_RECOVERY_SAMPLES = 5
+const DEFAULT_BUSY_ELU = 0.35
+const DEFAULT_PAUSE_ELU = 0.7
+const DEFAULT_BUSY_DELAY_MS = 40
+const DEFAULT_PAUSE_DELAY_MS = 150
+const DEFAULT_PAUSE_RSS_MIB = 1_024
+const DEFAULT_PAUSE_AVAILABLE_MIB = 0
+const POWER_PROBE_INTERVAL_MS = 30_000
 
 /** Settings namespace used to expose the read-only Usage card in Plugins settings. */
 export const USAGE_LEDGER_SETTINGS_NAMESPACE = 'usage-ledger' as const
@@ -66,24 +93,58 @@ const UsageLedgerSettingsSchema = z.object({}) as unknown as z<UsageLedgerSettin
 /** Enable or disable the isolated historical reader process. */
 export type UsageLedgerBackfillMode = 'process' | 'off'
 
+/** Select automatic replay for all retained history or only the priority window. */
+export type UsageLedgerBackfillScope = 'all' | 'recent'
+
 /** Runtime configuration for the background ledger coordinator. */
 export interface Config {
+  /** Private SQLite path supplied by the bundle patch through dshHomePath(). */
+  readonly databasePath?: string
   readonly backfillMode?: UsageLedgerBackfillMode
+  /** All scans older retained sessions after the recent priority window. */
+  readonly backfillScope?: UsageLedgerBackfillScope
+  /** Recent window processed before older history. */
   readonly backfillDays?: number
   readonly workerMaxHeapMiB?: number
+  /** Maximum unfinished attempts retained for one malformed or stalled session. */
+  readonly workerMaxActiveAttempts?: number
   readonly workerBatchEvents?: number
   readonly workerSliceMs?: number
+  /** Pause historical scanning when the Mac is not confirmed to be on AC power. */
+  readonly backfillPowerMode?: UsageLedgerAdaptiveConfig['powerMode']
+  readonly loadSampleIntervalMs?: number
+  readonly backfillMinDelayMs?: number
+  readonly backfillMaxDelayMs?: number
+  readonly backfillRecoverySamples?: number
+  readonly backfillBusyEventLoopUtilization?: number
+  readonly backfillPauseEventLoopUtilization?: number
+  readonly backfillBusyEventLoopDelayMs?: number
+  readonly backfillPauseEventLoopDelayMs?: number
+  readonly backfillPauseRssMiB?: number
+  readonly backfillPauseAvailableMemoryMiB?: number
+  /** Maximum detailed call rows returned by one snapshot. Aggregates remain complete. */
+  readonly snapshotEventLimit?: number
+  /** Rows read per event-loop turn while projecting one snapshot. */
+  readonly snapshotScanBatchRows?: number
 }
 
 interface ResolvedConfig {
+  readonly databasePath: string
   readonly backfillMode: UsageLedgerBackfillMode
+  readonly backfillScope: UsageLedgerBackfillScope
   readonly backfillDays: number
   readonly workerMaxHeapMiB: number
+  readonly workerMaxActiveAttempts: number
   readonly workerBatchEvents: number
   readonly workerSliceMs: number
+  readonly snapshotEventLimit: number
+  readonly snapshotScanBatchRows: number
+  readonly adaptive: UsageLedgerAdaptiveConfig & { readonly sampleIntervalMs: number }
 }
 
 const BackfillModeSchema = z.union([z.const('process'), z.const('off')])
+const BackfillScopeSchema = z.union([z.const('all'), z.const('recent')])
+const PowerModeSchema = z.union([z.const('ac-only'), z.const('always')])
 
 const ZERO_TOTALS = {
   inputTokens: 0,
@@ -100,9 +161,19 @@ const ZERO_TOTALS = {
 
 interface ResolvedSnapshotRequest {
   readonly workspace: string | null
+  readonly provider: string | null
+  readonly model: string | null
+  readonly all: boolean
   readonly days: number
   readonly throughDay: string
   readonly timeZone: string
+}
+
+interface LedgerRange {
+  readonly fromDay: string
+  readonly days: number
+  readonly start: number
+  readonly end: number
 }
 
 interface PersistenceReaderRuntime {
@@ -115,23 +186,78 @@ interface ListedSession {
 }
 
 function resolveConfig(config: Config): ResolvedConfig {
+  const databasePath = config.databasePath
+  if (typeof databasePath !== 'string' || databasePath.length === 0) {
+    throw new TypeError('usage ledger databasePath must be configured by the profile patch')
+  }
   const backfillMode = config.backfillMode ?? 'process'
+  const backfillScope = config.backfillScope ?? 'all'
   const backfillDays = config.backfillDays ?? DEFAULT_DAYS
   const workerMaxHeapMiB = config.workerMaxHeapMiB ?? DEFAULT_HEAP_MIB
+  const workerMaxActiveAttempts = config.workerMaxActiveAttempts ?? DEFAULT_MAX_ACTIVE_ATTEMPTS
   const workerBatchEvents = config.workerBatchEvents ?? DEFAULT_BATCH_EVENTS
   const workerSliceMs = config.workerSliceMs ?? DEFAULT_SLICE_MS
-  if (backfillMode !== 'process' && backfillMode !== 'off') throw new RangeError(`usage ledger backfillMode is invalid: '${String(backfillMode)}'`)
+  const snapshotEventLimit = config.snapshotEventLimit ?? DEFAULT_EVENT_LIMIT
+  const snapshotScanBatchRows = config.snapshotScanBatchRows ?? DEFAULT_SCAN_BATCH_ROWS
+  const adaptive = {
+    powerMode: config.backfillPowerMode ?? 'ac-only',
+    sampleIntervalMs: config.loadSampleIntervalMs ?? DEFAULT_SAMPLE_INTERVAL_MS,
+    minDelayMs: config.backfillMinDelayMs ?? DEFAULT_MIN_DELAY_MS,
+    maxDelayMs: config.backfillMaxDelayMs ?? DEFAULT_MAX_DELAY_MS,
+    recoverySamples: config.backfillRecoverySamples ?? DEFAULT_RECOVERY_SAMPLES,
+    busyEventLoopUtilization: config.backfillBusyEventLoopUtilization ?? DEFAULT_BUSY_ELU,
+    pauseEventLoopUtilization: config.backfillPauseEventLoopUtilization ?? DEFAULT_PAUSE_ELU,
+    busyEventLoopDelayMs: config.backfillBusyEventLoopDelayMs ?? DEFAULT_BUSY_DELAY_MS,
+    pauseEventLoopDelayMs: config.backfillPauseEventLoopDelayMs ?? DEFAULT_PAUSE_DELAY_MS,
+    pauseRssMiB: config.backfillPauseRssMiB ?? DEFAULT_PAUSE_RSS_MIB,
+    pauseAvailableMemoryMiB: config.backfillPauseAvailableMemoryMiB ?? DEFAULT_PAUSE_AVAILABLE_MIB,
+  }
+  if (backfillMode !== 'process' && backfillMode !== 'off') throw new RangeError('usage ledger backfillMode is invalid: ' + String(backfillMode))
+  if (backfillScope !== 'all' && backfillScope !== 'recent') throw new RangeError('usage ledger backfillScope is invalid: ' + String(backfillScope))
+  if (adaptive.powerMode !== 'ac-only' && adaptive.powerMode !== 'always') throw new RangeError('usage ledger backfillPowerMode is invalid: ' + String(adaptive.powerMode))
   for (const [name, value, min, max] of [
     ['backfillDays', backfillDays, 1, MAX_DAYS],
     ['workerMaxHeapMiB', workerMaxHeapMiB, 128, 4096],
+    ['workerMaxActiveAttempts', workerMaxActiveAttempts, 1, 4096],
     ['workerBatchEvents', workerBatchEvents, 1, 4096],
-    ['workerSliceMs', workerSliceMs, 1, 1000],
+    ['workerSliceMs', workerSliceMs, 1, 1_000],
+    ['snapshotEventLimit', snapshotEventLimit, 1, 4_096],
+    ['snapshotScanBatchRows', snapshotScanBatchRows, 1, 4_096],
+    ['loadSampleIntervalMs', adaptive.sampleIntervalMs, 100, 60_000],
+    ['backfillMinDelayMs', adaptive.minDelayMs, 0, 60_000],
+    ['backfillMaxDelayMs', adaptive.maxDelayMs, 1, 60_000],
+    ['backfillRecoverySamples', adaptive.recoverySamples, 1, 1_000],
+    ['backfillBusyEventLoopDelayMs', adaptive.busyEventLoopDelayMs, 1, 60_000],
+    ['backfillPauseEventLoopDelayMs', adaptive.pauseEventLoopDelayMs, 1, 60_000],
+    ['backfillPauseRssMiB', adaptive.pauseRssMiB, 64, 1_048_576],
+    ['backfillPauseAvailableMemoryMiB', adaptive.pauseAvailableMemoryMiB, 0, 1_048_576],
   ] as const) {
     if (!Number.isSafeInteger(value) || value < min || value > max) {
-      throw new RangeError(`usage ledger ${name} must be a safe integer from ${String(min)} through ${String(max)}`)
+      throw new RangeError('usage ledger ' + name + ' must be a safe integer from ' + String(min) + ' through ' + String(max))
     }
   }
-  return { backfillMode, backfillDays, workerMaxHeapMiB, workerBatchEvents, workerSliceMs }
+  for (const [name, value] of [
+    ['backfillBusyEventLoopUtilization', adaptive.busyEventLoopUtilization],
+    ['backfillPauseEventLoopUtilization', adaptive.pauseEventLoopUtilization],
+  ] as const) {
+    if (!Number.isFinite(value) || value <= 0 || value > 1) throw new RangeError('usage ledger ' + name + ' must be a number greater than 0 through 1')
+  }
+  if (adaptive.minDelayMs > adaptive.maxDelayMs) throw new RangeError('usage ledger backfillMinDelayMs must not exceed backfillMaxDelayMs')
+  if (adaptive.busyEventLoopUtilization > adaptive.pauseEventLoopUtilization) throw new RangeError('usage ledger busy utilization must not exceed pause utilization')
+  if (adaptive.busyEventLoopDelayMs > adaptive.pauseEventLoopDelayMs) throw new RangeError('usage ledger busy event-loop delay must not exceed pause delay')
+  return {
+    databasePath,
+    backfillMode,
+    backfillScope,
+    backfillDays,
+    workerMaxHeapMiB,
+    workerMaxActiveAttempts,
+    workerBatchEvents,
+    workerSliceMs,
+    snapshotEventLimit,
+    snapshotScanBatchRows,
+    adaptive,
+  }
 }
 
 /** Format an epoch timestamp as a calendar day in an IANA timezone. */
@@ -145,8 +271,8 @@ function zoneDay(time: number, timeZone: string): string {
   const year = parts.find(part => part.type === 'year')?.value
   const month = parts.find(part => part.type === 'month')?.value
   const day = parts.find(part => part.type === 'day')?.value
-  if (year === undefined || month === undefined || day === undefined) throw new Error(`usage ledger could not format date in timezone '${timeZone}'`)
-  return `${year}-${month}-${day}`
+  if (year === undefined || month === undefined || day === undefined) throw new Error('usage ledger could not format date in timezone ' + timeZone)
+  return year + '-' + month + '-' + day
 }
 
 function utcDay(time: number): string {
@@ -154,24 +280,63 @@ function utcDay(time: number): string {
 }
 
 function shiftDay(day: string, offset: number): string {
-  const instant = new Date(`${day}T00:00:00.000Z`)
+  const instant = new Date(day + 'T00:00:00.000Z')
   instant.setUTCDate(instant.getUTCDate() + offset)
   return utcDay(instant.getTime())
 }
 
+function dayCount(fromDay: string, throughDay: string): number {
+  return Math.round((Date.parse(throughDay + 'T00:00:00.000Z') - Date.parse(fromDay + 'T00:00:00.000Z')) / 86_400_000) + 1
+}
+
+function zoneOffset(time: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(time))
+  const number = (kind: Intl.DateTimeFormatPartTypes): number => {
+    const value = parts.find(part => part.type === kind)?.value
+    if (value === undefined) throw new Error('usage ledger could not resolve time zone part ' + kind)
+    return Number(value)
+  }
+  return Date.UTC(number('year'), number('month') - 1, number('day'), number('hour'), number('minute'), number('second')) - time
+}
+
+/** Resolve a local calendar midnight to an epoch, including normal DST offset changes. */
+function zoneDayStart(day: string, timeZone: string): number {
+  const [year, month, date] = day.split('-').map(Number)
+  if (year === undefined || month === undefined || date === undefined) throw new Error('usage ledger received invalid day ' + day)
+  const base = Date.UTC(year, month - 1, date)
+  let candidate = base - zoneOffset(base, timeZone)
+  candidate = base - zoneOffset(candidate, timeZone)
+  return candidate
+}
+
 function resolveSnapshotRequest(request: UsageLedgerSnapshotRequest | undefined): ResolvedSnapshotRequest {
   const workspace = request?.workspace ?? null
+  const provider = request?.provider ?? null
+  const model = request?.model ?? null
+  const all = request?.all ?? false
   const days = request?.days ?? DEFAULT_DAYS
   const timeZone = request?.timeZone ?? 'UTC'
-  if (workspace !== null && typeof workspace !== 'string') throw new TypeError('usage ledger workspace must be a string or null')
+  for (const [name, value] of [['workspace', workspace], ['provider', provider], ['model', model]] as const) {
+    if (value !== null && typeof value !== 'string') throw new TypeError('usage ledger ' + name + ' must be a string or null')
+  }
   if (typeof timeZone !== 'string' || timeZone.length === 0) throw new TypeError('usage ledger timeZone must be a non-empty IANA timezone')
+  if (typeof all !== 'boolean') throw new TypeError('usage ledger all must be a boolean')
   try {
     new Intl.DateTimeFormat('en-US', { timeZone }).format()
   } catch {
-    throw new RangeError(`usage ledger timeZone is invalid: '${timeZone}'`)
+    throw new RangeError('usage ledger timeZone is invalid: ' + timeZone)
   }
-  if (!Number.isSafeInteger(days) || days < 1 || days > MAX_DAYS) throw new RangeError(`usage ledger days must be a safe integer from 1 through ${MAX_DAYS}`)
-  return { workspace, days, throughDay: zoneDay(Date.now(), timeZone), timeZone }
+  if (!all && (!Number.isSafeInteger(days) || days < 1 || days > MAX_DAYS)) throw new RangeError('usage ledger days must be a safe integer from 1 through ' + String(MAX_DAYS))
+  return { workspace, provider, model, all, days, throughDay: zoneDay(Date.now(), timeZone), timeZone }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -196,7 +361,7 @@ function validateHeader(value: unknown): SessionHeader {
   return value as unknown as SessionHeader
 }
 
-async function listRecentSessions(persistence: SessionPersistence, days: number): Promise<readonly ListedSession[]> {
+async function listFallbackSessions(persistence: SessionPersistence, scope: UsageLedgerBackfillScope, days: number): Promise<readonly ListedSession[]> {
   const runtime = persistence as unknown as PersistenceReaderRuntime
   const listed = await runtime.list()
   if (!Array.isArray(listed)) throw new TypeError('usage ledger received an invalid session listing')
@@ -205,7 +370,7 @@ async function listRecentSessions(persistence: SessionPersistence, days: number)
   for (const value of listed) {
     const record = isRecord(value) && isRecord(value.header) ? value.header : value
     const header = validateHeader(record)
-    if (header.createdAt >= cutoff) result.push({ header })
+    if (scope === 'all' || header.createdAt >= cutoff) result.push({ header })
   }
   return result
 }
@@ -219,10 +384,13 @@ function validateReaderSpec(value: unknown): WorkerReaderSpec | undefined {
     || Object.values(value.options).some(option => typeof option !== 'string' && typeof option !== 'number' && typeof option !== 'boolean'))) {
     throw new TypeError('usage ledger background reader options must be JSON-safe primitives')
   }
+  if (value.supportsSessionListing !== undefined && typeof value.supportsSessionListing !== 'boolean') {
+    throw new TypeError('usage ledger background reader supportsSessionListing must be boolean')
+  }
   return value as unknown as WorkerReaderSpec
 }
 
-/** Copy only the usage-bearing fields across the process boundary. */
+/** Copy only usage-bearing event fields across the process boundary. */
 function compactEvent(event: SessionEvent): UsageSessionEvent | undefined {
   const base = { seq: event.seq, time: event.time }
   switch (event.type) {
@@ -332,39 +500,88 @@ function compareModels(left: UsageLedgerModelRow, right: UsageLedgerModelRow): n
     || left.model.localeCompare(right.model)
 }
 
-/** Host service that coordinates compact live events and isolated history replay. */
+function csvCell(value: boolean | number | string | undefined): string {
+  return '"' + (value === undefined ? '' : String(value)).replaceAll('"', '""') + '"'
+}
+
+async function writeCsv(stream: ReturnType<typeof createWriteStream>, row: readonly (boolean | number | string | undefined)[]): Promise<void> {
+  if (stream.write(row.map(csvCell).join(',') + '\n')) return
+  await once(stream, 'drain')
+}
+
+async function powerSource(): Promise<UsageLedgerPowerSource> {
+  if (process.platform !== 'darwin') return 'unknown'
+  return new Promise(resolve => {
+    execFile('/usr/bin/pmset', ['-g', 'batt'], { encoding: 'utf8', timeout: 1_000 }, (error, stdout) => {
+      if (error !== null) {
+        resolve('unknown')
+        return
+      }
+      if (stdout.includes("Now drawing from 'AC Power'")) {
+        resolve('ac')
+        return
+      }
+      if (stdout.includes("Now drawing from 'Battery Power'")) {
+        resolve('battery')
+        return
+      }
+      resolve('unknown')
+    })
+  })
+}
+
+/** Host service that keeps all heavyweight ledger work outside the task process. */
 export class UsageLedgerService extends TypertRemoteService {
-  static inject = ['storageDomain', 'sessions', 'sessionPersistence']
+  static inject = ['sessions', 'sessionPersistence']
   static Config: z<Config> = z.object({
+    databasePath: z.string().required(),
     backfillMode: BackfillModeSchema.default('process'),
+    backfillScope: BackfillScopeSchema.default('all'),
     backfillDays: z.number().step(1).min(1).max(MAX_DAYS).default(DEFAULT_DAYS),
     workerMaxHeapMiB: z.number().step(1).min(128).max(4096).default(DEFAULT_HEAP_MIB),
+    workerMaxActiveAttempts: z.number().step(1).min(1).max(4096).default(DEFAULT_MAX_ACTIVE_ATTEMPTS),
     workerBatchEvents: z.number().step(1).min(1).max(4096).default(DEFAULT_BATCH_EVENTS),
-    workerSliceMs: z.number().step(1).min(1).max(1000).default(DEFAULT_SLICE_MS),
+    workerSliceMs: z.number().step(1).min(1).max(1_000).default(DEFAULT_SLICE_MS),
+    backfillPowerMode: PowerModeSchema.default('ac-only'),
+    loadSampleIntervalMs: z.number().step(1).min(100).max(60_000).default(DEFAULT_SAMPLE_INTERVAL_MS),
+    backfillMinDelayMs: z.number().step(1).min(0).max(60_000).default(DEFAULT_MIN_DELAY_MS),
+    backfillMaxDelayMs: z.number().step(1).min(1).max(60_000).default(DEFAULT_MAX_DELAY_MS),
+    backfillRecoverySamples: z.number().step(1).min(1).max(1_000).default(DEFAULT_RECOVERY_SAMPLES),
+    backfillBusyEventLoopUtilization: z.number().min(0.001).max(1).default(DEFAULT_BUSY_ELU),
+    backfillPauseEventLoopUtilization: z.number().min(0.001).max(1).default(DEFAULT_PAUSE_ELU),
+    backfillBusyEventLoopDelayMs: z.number().step(1).min(1).max(60_000).default(DEFAULT_BUSY_DELAY_MS),
+    backfillPauseEventLoopDelayMs: z.number().step(1).min(1).max(60_000).default(DEFAULT_PAUSE_DELAY_MS),
+    backfillPauseRssMiB: z.number().step(1).min(64).max(1_048_576).default(DEFAULT_PAUSE_RSS_MIB),
+    backfillPauseAvailableMemoryMiB: z.number().step(1).min(0).max(1_048_576).default(DEFAULT_PAUSE_AVAILABLE_MIB),
+    snapshotEventLimit: z.number().step(1).min(1).max(4_096).default(DEFAULT_EVENT_LIMIT),
+    snapshotScanBatchRows: z.number().step(1).min(1).max(4_096).default(DEFAULT_SCAN_BATCH_ROWS),
   })
 
   private readonly resolvedConfig: ResolvedConfig
   private readonly worker: UsageWorkerSupervisor
-  private sessions?: KvTable<SessionId, UsageLedgerSessionRow>
-  private calls?: KvTable<string, UsageLedgerCallRow>
-  private accepting = true
-  private pendingCalls = new Map<string, UsageLedgerCallRow>()
-  private pendingCursors = new Map<string, UsageLedgerSessionRow>()
-  private pendingDeletes = new Map<string, number>()
-  private writeScheduled = false
-  private writing = false
-  private retryTimer: ReturnType<typeof setTimeout> | undefined
+  private readonly loopDelay = monitorEventLoopDelay({ resolution: 20 })
+  private readonly governor: UsageLedgerGovernor
+  private lastUtilization = performance.eventLoopUtilization()
+  private hasLoadSample = false
+  private database: UsageLedgerDatabase | undefined
+  private sampleTimer: ReturnType<typeof setInterval> | undefined
+  private powerSource: UsageLedgerPowerSource = 'unknown'
+  private lastPowerProbe = 0
+  private powerProbe: Promise<void> | undefined
+  private pace: UsageLedgerPace | undefined
   private status: UsageLedgerStatus
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'usageLedger', { namespace: 'usageLedgerPlugin' })
     this.resolvedConfig = resolveConfig(config)
+    this.governor = new UsageLedgerGovernor(this.resolvedConfig.adaptive)
     this.status = {
       state: this.resolvedConfig.backfillMode === 'off' ? 'paused' : 'idle',
       totalSessions: 0,
       processedSessions: 0,
       processedEvents: 0,
       backfillDays: this.resolvedConfig.backfillDays,
+      backfillScope: this.resolvedConfig.backfillScope,
       updatedAt: new Date().toISOString(),
     }
     this.worker = new UsageWorkerSupervisor({
@@ -376,18 +593,15 @@ export class UsageLedgerService extends TypertRemoteService {
     })
   }
 
-  /** Open SQLite-backed tables and install non-blocking observers. */
+  /** Open only a bounded SQLite connection; no call rows enter the Host heap. */
   protected async [Service.init](): Promise<void> {
-    const domain = await this.ctx.storageDomain.open(usageLedgerDomainSpec)
-    this.sessions = domain.table('sessions')
-    this.calls = domain.table('calls')
+    this.database = await openUsageLedgerDatabase(this.resolvedConfig.databasePath)
     this.ctx.effect(() => async () => {
-      this.accepting = false
+      this.stopGovernor()
       await this.worker.stop()
-      await this.drainWrites()
-      if (this.retryTimer !== undefined) clearTimeout(this.retryTimer)
-      await domain.close()
-    }, 'usage-ledger.domain-close')
+      this.database?.close()
+      this.database = undefined
+    }, 'usage-ledger.database-close')
 
     this.ctx.on('session/created', session => {
       this.worker.sendControl({ type: 'rescan', session: workerSession(session) }, session.id)
@@ -401,98 +615,174 @@ export class UsageLedgerService extends TypertRemoteService {
     }, { global: true })
 
     if (this.resolvedConfig.backfillMode === 'off') return
+    this.startGovernor()
     void this.startWorker(this.ctx.sessionPersistence)
   }
 
-  /** Start asynchronously so listing and worker startup never delay a task. */
+  /** Start independently of task initialization and keep fallback listing out of capable providers. */
   private async startWorker(persistence: SessionPersistence): Promise<void> {
-    let listed: readonly ListedSession[] = []
-    try {
-      listed = await listRecentSessions(persistence, this.resolvedConfig.backfillDays)
-    } catch (error: unknown) {
-      this.recordFailure(`historical session listing failed: ${error instanceof Error ? error.message : String(error)}`)
-    }
     let readerSpec: WorkerReaderSpec | undefined
     try {
       const runtime = persistence as unknown as PersistenceReaderRuntime
       readerSpec = validateReaderSpec(typeof runtime.backgroundReaderSpec === 'function' ? runtime.backgroundReaderSpec() : undefined)
     } catch (error: unknown) {
-      this.recordFailure(`provider-owned reader unavailable: ${error instanceof Error ? error.message : String(error)}`)
+      this.recordFailure('provider-owned reader unavailable: ' + (error instanceof Error ? error.message : String(error)))
+    }
+    let fallback: readonly ListedSession[] = []
+    if (readerSpec !== undefined && readerSpec.supportsSessionListing !== true) {
+      try {
+        fallback = await listFallbackSessions(persistence, this.resolvedConfig.backfillScope, this.resolvedConfig.backfillDays)
+      } catch (error: unknown) {
+        this.recordFailure('historical session listing failed: ' + (error instanceof Error ? error.message : String(error)))
+      }
     }
     try {
-      const liveSessions = this.ctx.sessions.list().map(workerSession)
-      const sessions = [...listed.map(({ header }) => ({
-        id: header.id,
-        createdAt: header.createdAt,
-        ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
-        inheritedEventCount: 0,
-      })), ...liveSessions]
-      const unique = new Map(sessions.map(session => [session.id, session]))
       const makeInitFrame = (): WorkerInitFrame => ({
         type: 'init',
         protocolVersion: USAGE_LEDGER_WORKER_PROTOCOL,
-        config: this.resolvedConfig,
+        config: {
+          databasePath: this.resolvedConfig.databasePath,
+          backfillScope: this.resolvedConfig.backfillScope,
+          backfillDays: this.resolvedConfig.backfillDays,
+          workerBatchEvents: this.resolvedConfig.workerBatchEvents,
+          workerSliceMs: this.resolvedConfig.workerSliceMs,
+          workerMaxHeapMiB: this.resolvedConfig.workerMaxHeapMiB,
+          workerMaxActiveAttempts: this.resolvedConfig.workerMaxActiveAttempts,
+        },
         ...(readerSpec === undefined ? {} : { readerSpec }),
-        sessions: [...unique.values()],
-        liveSessionIds: liveSessions.map(session => session.id),
-        cursors: [...this.requireSessions().entries()].map(([sessionId, row]) => ({ sessionId, row })),
-        calls: [...this.requireCalls().entries()].map(([key, row]) => ({ key, row })),
+        sessions: fallback.map(({ header }) => ({
+          id: header.id,
+          createdAt: header.createdAt,
+          ...(header.cwd === undefined ? {} : { cwd: header.cwd }),
+          inheritedEventCount: 0,
+        })),
+        liveSessionIds: this.ctx.sessions.list().map(session => session.id),
       })
       this.status = {
         ...this.status,
         state: readerSpec === undefined ? 'paused' : 'running',
-        totalSessions: listed.length,
+        totalSessions: fallback.length,
         updatedAt: new Date().toISOString(),
         ...(readerSpec === undefined ? { lastError: 'session persistence does not expose backgroundReaderSpec; historical backfill is paused' } : {}),
       }
       if (readerSpec === undefined) this.ctx.logger.warn('usage ledger: persistence has no provider-owned background reader; live ledger remains enabled')
       this.worker.start(makeInitFrame(), makeInitFrame)
     } catch (error: unknown) {
-      this.recordFailure(`background worker initialization failed: ${error instanceof Error ? error.message : String(error)}`)
+      this.recordFailure('background worker initialization failed: ' + (error instanceof Error ? error.message : String(error)))
     }
   }
 
-  /** Return committed SQLite data immediately; backfill state is independent. */
+  /** Return complete aggregates and a bounded event page without materializing the SQLite ledger. */
   @Remote('snapshot')
   async snapshot(request?: UsageLedgerSnapshotRequest): Promise<UsageLedgerSnapshot> {
     const resolved = resolveSnapshotRequest(request)
-    const fromDay = shiftDay(resolved.throughDay, 1 - resolved.days)
+    const range = this.resolveRange(resolved)
+    const { fromDay, days, start, end } = range
     const models = new Map<string, UsageLedgerModelRow>()
     const daily = new Map<string, UsageLedgerDailyRow>()
     const selected: UsageLedgerCallRow[] = []
-    for (let offset = 0; offset < resolved.days; offset += 1) {
+    let eventsTruncated = false
+    for (let offset = 0; offset < days; offset += 1) {
       const day = shiftDay(fromDay, offset)
       daily.set(day, { day, ...ZERO_TOTALS })
     }
-    for (const [, row] of this.requireCalls().entries()) {
-      const localDay = zoneDay(row.startedAt, resolved.timeZone)
-      if (localDay < fromDay || localDay > resolved.throughDay) continue
-      if (resolved.workspace !== null && row.workspace !== resolved.workspace) continue
-      selected.push(row)
-      const workspace = row.workspace ?? null
-      const key = JSON.stringify([workspace, row.provider, row.model])
-      const prior = models.get(key) ?? { workspace, provider: row.provider, model: row.model, ...ZERO_TOTALS }
-      models.set(key, addAttempt(prior, row))
-      const day = daily.get(localDay)
-      if (day !== undefined) daily.set(localDay, addAttempt(day, row))
-    }
+    let after: { startedAt: number; key: string } | undefined
+    do {
+      const page = this.requireDatabase().callsPage({
+        startedAtInclusive: start,
+        startedAtExclusive: end,
+        workspace: resolved.workspace,
+        provider: resolved.provider,
+        model: resolved.model,
+        ...(after === undefined ? {} : { after }),
+        limit: this.resolvedConfig.snapshotScanBatchRows,
+      })
+      for (const { row } of page.rows) {
+        const localDay = zoneDay(row.startedAt, resolved.timeZone)
+        if (localDay < fromDay || localDay > resolved.throughDay) continue
+        if (selected.length < this.resolvedConfig.snapshotEventLimit) selected.push(row)
+        else eventsTruncated = true
+        const workspace = row.workspace ?? null
+        const key = JSON.stringify([workspace, row.provider, row.model])
+        const prior = models.get(key) ?? { workspace, provider: row.provider, model: row.model, ...ZERO_TOTALS }
+        models.set(key, addAttempt(prior, row))
+        const day = daily.get(localDay)
+        if (day !== undefined) daily.set(localDay, addAttempt(day, row))
+      }
+      after = page.next
+      if (after !== undefined) await new Promise<void>(resolve => setImmediate(resolve))
+    } while (after !== undefined)
     return Object.freeze({
       workspace: resolved.workspace,
-      days: resolved.days,
+      days,
+      all: resolved.all,
       fromDay,
       throughDay: resolved.throughDay,
       timeZone: resolved.timeZone,
       updatedAt: new Date().toISOString(),
       events: Object.freeze(projectEvents(selected).map(row => Object.freeze(row))),
+      eventsTruncated,
       models: Object.freeze([...models.values()].sort(compareModels).map(row => Object.freeze(row))),
       daily: Object.freeze([...daily.values()].map(row => Object.freeze(row))),
     })
   }
 
-  /** Non-blocking worker state for the Usage page. */
+  /** Write all matching call rows in bounded SQLite pages to an owner-only CSV. */
+  @Remote('exportCsv')
+  async exportCsv(request?: UsageLedgerExportRequest): Promise<UsageLedgerExportResult> {
+    const resolved = resolveSnapshotRequest(request)
+    const range = this.resolveRange(resolved)
+    const databaseDirectory = dirname(resolve(this.resolvedConfig.databasePath))
+    const outputDirectory = join(databaseDirectory, 'usage-ledger-exports')
+    await mkdir(outputDirectory, { recursive: true, mode: 0o700 })
+    const name = 'usage-ledger-' + new Date().toISOString().replaceAll(/[:.]/g, '-') + '-' + randomUUID() + '.csv'
+    const path = join(outputDirectory, name)
+    const stream = createWriteStream(path, { flags: 'wx', mode: 0o600 })
+    let rows = 0
+    try {
+      await writeCsv(stream, [
+        'sessionId', 'createdAt', 'workspace', 'attemptId', 'turn', 'step',
+        'provider', 'model', 'startedAt', 'outcome', 'retryScheduled',
+        'inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens',
+      ])
+      let after: { startedAt: number; key: string } | undefined
+      do {
+        const page = this.requireDatabase().callsPage({
+          startedAtInclusive: range.start,
+          startedAtExclusive: range.end,
+          workspace: resolved.workspace,
+          provider: resolved.provider,
+          model: resolved.model,
+          ...(after === undefined ? {} : { after }),
+          limit: this.resolvedConfig.snapshotScanBatchRows,
+        })
+        for (const { row } of page.rows) {
+          const localDay = zoneDay(row.startedAt, resolved.timeZone)
+          if (localDay < range.fromDay || localDay > resolved.throughDay) continue
+          const usage = row.finalUsage ?? row.provisionalUsage
+          await writeCsv(stream, [
+            row.sessionId, row.createdAt, row.workspace, row.attemptId, row.turn, row.step,
+            row.provider, row.model, row.startedAt, row.outcome, row.retryScheduled === true,
+            usage?.inputTokens, usage?.outputTokens, usage?.cacheReadTokens, usage?.cacheWriteTokens,
+          ])
+          rows += 1
+        }
+        after = page.next
+        if (after !== undefined) await new Promise<void>(resolve => setImmediate(resolve))
+      } while (after !== undefined)
+      stream.end()
+      await once(stream, 'close')
+    } catch (error: unknown) {
+      stream.destroy()
+      throw error
+    }
+    return { path, rows, fromDay: range.fromDay, throughDay: resolved.throughDay }
+  }
+
+  /** Non-blocking worker and workload state for the Usage page. */
   @Remote('status')
   statusSnapshot(): UsageLedgerStatus {
-    return Object.freeze({ ...this.status })
+    return Object.freeze({ ...this.status, ...(this.pace === undefined ? {} : { pace: this.pace }) })
   }
 
   private handleWorkerResponse(frame: WorkerResponseFrame): void {
@@ -508,108 +798,94 @@ export class UsageLedgerService extends TypertRemoteService {
           ...(frame.currentSessionId === undefined ? { currentSessionId: undefined } : { currentSessionId: frame.currentSessionId }),
         }
         return
-      case 'mutation':
-        for (const mutation of frame.mutations) {
-          if (mutation.type === 'call-upsert') {
-            this.pendingCalls.set(mutation.key, mutation.row)
-          } else if (mutation.type === 'cursor-upsert') {
-            this.pendingCursors.set(mutation.sessionId, mutation.row)
-            this.pendingDeletes.delete(mutation.sessionId)
-          } else {
-            this.pendingDeletes.set(mutation.sessionId, mutation.createdAt)
-            this.pendingCursors.delete(mutation.sessionId)
-          }
-        }
-        this.scheduleWrites()
-        return
       case 'checkpoint':
       case 'done':
         return
       case 'error':
-        this.recordFailure(frame.sessionId === undefined ? frame.message : `session '${frame.sessionId}': ${frame.message}`)
+        this.recordFailure(frame.sessionId === undefined ? frame.message : 'session ' + frame.sessionId + ': ' + frame.message)
         return
+    }
+  }
+
+  private startGovernor(): void {
+    this.loopDelay.enable()
+    void this.sampleLoad()
+    this.sampleTimer = setInterval(() => { void this.sampleLoad() }, this.resolvedConfig.adaptive.sampleIntervalMs)
+    this.sampleTimer.unref?.()
+  }
+
+  private stopGovernor(): void {
+    if (this.sampleTimer !== undefined) clearInterval(this.sampleTimer)
+    this.sampleTimer = undefined
+    this.loopDelay.disable()
+  }
+
+  private async sampleLoad(): Promise<void> {
+    const now = Date.now()
+    if (now - this.lastPowerProbe >= POWER_PROBE_INTERVAL_MS && this.powerProbe === undefined) {
+      this.lastPowerProbe = now
+      this.powerProbe = powerSource().then(source => {
+        this.powerSource = source
+      }).catch(() => {
+        this.powerSource = 'unknown'
+      }).finally(() => {
+        this.powerProbe = undefined
+      })
+      await this.powerProbe
+    }
+    const utilization = performance.eventLoopUtilization(this.lastUtilization)
+    this.lastUtilization = performance.eventLoopUtilization()
+    const delayMs = this.loopDelay.percentile(99) / 1_000_000
+    this.loopDelay.reset()
+    const rssMiB = process.memoryUsage().rss / (1024 * 1024)
+    const available = typeof process.availableMemory === 'function'
+      ? process.availableMemory() / (1024 * 1024)
+      : undefined
+    const firstSample = !this.hasLoadSample
+    this.hasLoadSample = true
+    const next = this.governor.observe({
+      powerSource: this.powerSource,
+      eventLoopUtilization: firstSample ? 0 : utilization.utilization,
+      eventLoopDelayMs: firstSample || !Number.isFinite(delayMs) ? 0 : delayMs,
+      rssMiB,
+      availableMemoryMiB: available,
+    })
+    if (this.pace?.mode === next.mode && this.pace.delayMs === next.delayMs && this.pace.reason === next.reason) return
+    this.pace = next
+    this.worker.sendControl({
+      type: 'pace',
+      mode: next.mode,
+      delayMs: next.delayMs,
+      ...(next.reason === undefined ? {} : { reason: next.reason }),
+    }, 'pace')
+    if (next.mode === 'pause' && this.status.state !== 'failed') {
+      this.status = { ...this.status, state: 'paused', updatedAt: new Date().toISOString() }
     }
   }
 
   private recordFailure(message: string): void {
     this.status = { ...this.status, state: 'failed', lastError: message, updatedAt: new Date().toISOString() }
-    this.ctx.logger.warn(`usage ledger: ${message}`)
+    this.ctx.logger.warn('usage ledger: ' + message)
   }
 
-  private scheduleWrites(): void {
-    if (this.writeScheduled || this.writing) return
-    this.writeScheduled = true
-    setImmediate(() => {
-      this.writeScheduled = false
-      void this.drainWrites()
-    })
-  }
-
-  private async drainWrites(): Promise<void> {
-    if (this.writing) return
-    this.writing = true
-    try {
-      const calls = this.requireCalls()
-      const sessions = this.requireSessions()
-      const callBatch = [...this.pendingCalls.entries()].slice(0, 64)
-      for (const [key] of callBatch) this.pendingCalls.delete(key)
-      for (let index = 0; index < callBatch.length; index += 1) {
-        const [key, row] = callBatch[index] as [string, UsageLedgerCallRow]
-        try {
-          await calls.put(key, row)
-        } catch (error: unknown) {
-          for (const [remainingKey, remainingRow] of callBatch.slice(index)) this.pendingCalls.set(remainingKey, remainingRow)
-          this.recordFailure(`call write failed: ${error instanceof Error ? error.message : String(error)}`)
-          break
-        }
-      }
-      const cursorBatch = [...this.pendingCursors.entries()].slice(0, 64)
-      for (const [key] of cursorBatch) this.pendingCursors.delete(key)
-      for (let index = 0; index < cursorBatch.length; index += 1) {
-        const [key, row] = cursorBatch[index] as [string, UsageLedgerSessionRow]
-        try {
-          await sessions.put(key as SessionId, row)
-        } catch (error: unknown) {
-          for (const [remainingKey, remainingRow] of cursorBatch.slice(index)) this.pendingCursors.set(remainingKey, remainingRow)
-          this.recordFailure(`cursor write failed: ${error instanceof Error ? error.message : String(error)}`)
-          break
-        }
-      }
-      const deleteBatch = [...this.pendingDeletes.entries()].slice(0, 64)
-      for (const [key] of deleteBatch) this.pendingDeletes.delete(key)
-      for (let index = 0; index < deleteBatch.length; index += 1) {
-        const [key, createdAt] = deleteBatch[index] as [string, number]
-        const row = sessions.get(key as SessionId)
-        if (row?.createdAt !== createdAt) continue
-        try {
-          await sessions.delete(key as SessionId)
-        } catch (error: unknown) {
-          for (const [remainingKey, remainingCreatedAt] of deleteBatch.slice(index)) this.pendingDeletes.set(remainingKey, remainingCreatedAt)
-          this.recordFailure(`cursor delete failed: ${error instanceof Error ? error.message : String(error)}`)
-          break
-        }
-      }
-    } finally {
-      this.writing = false
-    }
-    if (this.pendingCalls.size > 0 || this.pendingCursors.size > 0 || this.pendingDeletes.size > 0) {
-      if (this.retryTimer === undefined) {
-        this.retryTimer = setTimeout(() => {
-          this.retryTimer = undefined
-          this.scheduleWrites()
-        }, 250)
-      }
+  private resolveRange(resolved: ResolvedSnapshotRequest): LedgerRange {
+    const earliest = resolved.all
+      ? this.requireDatabase().firstCallTime(resolved.workspace, resolved.provider, resolved.model)
+      : undefined
+    const fromDay = earliest === undefined
+      ? resolved.all ? resolved.throughDay : shiftDay(resolved.throughDay, 1 - resolved.days)
+      : zoneDay(earliest, resolved.timeZone)
+    return {
+      fromDay,
+      days: resolved.all ? dayCount(fromDay, resolved.throughDay) : resolved.days,
+      start: zoneDayStart(fromDay, resolved.timeZone),
+      end: zoneDayStart(shiftDay(resolved.throughDay, 1), resolved.timeZone),
     }
   }
 
-  private requireSessions(): KvTable<SessionId, UsageLedgerSessionRow> {
-    if (this.sessions === undefined) throw new Error('usage ledger is not initialized')
-    return this.sessions
-  }
-
-  private requireCalls(): KvTable<string, UsageLedgerCallRow> {
-    if (this.calls === undefined) throw new Error('usage ledger is not initialized')
-    return this.calls
+  private requireDatabase(): UsageLedgerDatabase {
+    if (this.database === undefined) throw new Error('usage ledger is not initialized')
+    return this.database
   }
 }
 
