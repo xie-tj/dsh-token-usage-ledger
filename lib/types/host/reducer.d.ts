@@ -45,11 +45,14 @@ export declare class UsageLedgerReducer {
     private readonly calls;
     private readonly cursors;
     private readonly routes;
+    private readonly routeTimes;
     constructor(seed?: LedgerReducerSeed);
     /** Return a copy of the current durable call rows for Host snapshots/tests. */
     callEntries(): IterableIterator<[string, UsageLedgerCallRow]>;
     /** Return the reducer cursor for one lifecycle, if one has been observed. */
     cursor(sessionId: string): UsageLedgerSessionRow | undefined;
+    /** Return the first sequence that needs to be replayed for this lifecycle. */
+    resumeSeq(session: LedgerSession): number;
     /** Apply one bounded event batch in sequence order. */
     applyBatch(session: LedgerSession, events: readonly UsageSessionEvent[]): readonly LedgerMutation[];
     /** Remove a disposed lifecycle cursor while retaining its historical calls. */
