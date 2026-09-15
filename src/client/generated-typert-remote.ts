@@ -106,6 +106,7 @@ const dsh_plugin_usage_ledger_usageLedgerPlugin_status_result$schema = z.object(
   'pace': z.union([z.undefined(), z.object({
   'mode': z.union([z.literal("run"), z.literal("pause")]),
   'delayMs': z.number(),
+  'workShare': z.number(),
   'reason': z.union([z.undefined(), z.literal("battery"), z.literal("event-loop"), z.literal("memory")]).optional(),
 })]).readonly().optional(),
   'currentSessionId': z.union([z.undefined(), z.string()]).readonly().optional(),
@@ -140,7 +141,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerExportResult',
         schema: dsh_plugin_usage_ledger_usageLedgerPlugin_exportCsv_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":732,"column":9},
+      sourceLocation: {"file":"src/host/index.ts","line":765,"column":9},
     },
     {
       id: 'dsh-plugin-usage-ledger#usageLedgerPlugin/snapshot',
@@ -166,7 +167,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerSnapshot',
         schema: dsh_plugin_usage_ledger_usageLedgerPlugin_snapshot_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":677,"column":9},
+      sourceLocation: {"file":"src/host/index.ts","line":710,"column":9},
     },
     {
       id: 'dsh-plugin-usage-ledger#usageLedgerPlugin/status',
@@ -182,7 +183,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerStatus',
         schema: dsh_plugin_usage_ledger_usageLedgerPlugin_status_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":784,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":817,"column":3},
     },
   ],
 }

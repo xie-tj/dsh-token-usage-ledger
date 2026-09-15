@@ -154,6 +154,37 @@ describe('Usage dashboard GUI', () => {
     }
   })
 
+  it('shows the localized pause reason from the live worker status', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+    const readSnapshot = vi.fn(async () => snapshot)
+    const readStatus = vi.fn(async () => ({
+      state: 'paused' as const,
+      totalSessions: 2,
+      processedSessions: 1,
+      processedEvents: 4,
+      backfillDays: 30,
+      backfillScope: 'all' as const,
+      pace: { mode: 'pause' as const, delayMs: 60_000, workShare: 0.05, reason: 'memory' as const },
+      updatedAt: '2026-01-01T12:00:00.000Z',
+    }))
+    const translate = (key: string) => key
+
+    try {
+      await act(async () => {
+        root.render(<UsageDashboard readSnapshot={readSnapshot} readStatus={readStatus} t={translate as never} />)
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(container.textContent).toContain('backfillPausedMemory')
+      expect(readStatus).toHaveBeenCalled()
+    } finally {
+      await act(async () => { root.unmount() })
+      container.remove()
+    }
+  })
+
   it('loads the dashboard only after its Plugins card expands', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)

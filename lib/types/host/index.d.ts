@@ -36,8 +36,12 @@ export interface Config {
     /** Pause historical scanning when the Mac is not confirmed to be on AC power. */
     readonly backfillPowerMode?: UsageLedgerAdaptiveConfig['powerMode'];
     readonly loadSampleIntervalMs?: number;
-    readonly backfillMinDelayMs?: number;
     readonly backfillMaxDelayMs?: number;
+    readonly backfillInitialWorkShare?: number;
+    readonly backfillMinWorkShare?: number;
+    readonly backfillMaxWorkShare?: number;
+    readonly backfillAimdIncrease?: number;
+    readonly backfillAimdDecrease?: number;
     readonly backfillRecoverySamples?: number;
     readonly backfillBusyEventLoopUtilization?: number;
     readonly backfillPauseEventLoopUtilization?: number;

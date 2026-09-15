@@ -63,13 +63,17 @@ bundle patch 默认提供 databasePath，通常不需要手动配置。需要调
 | workerSliceMs | 25 | 处理后主动让出的最长时间片 |
 | backfillPowerMode | ac-only | ac-only 仅接电回填；always 忽略电源状态 |
 | loadSampleIntervalMs | 2000 | 主进程负载采样间隔 |
-| backfillMinDelayMs | 25 | 空闲时的最小 slice 间隔 |
 | backfillMaxDelayMs | 60000 | 暂停或强退让的最长间隔 |
+| backfillInitialWorkShare | 0.10 | worker 初始处理时间占比 |
+| backfillMinWorkShare | 0.05 | worker 的最低处理时间占比 |
+| backfillMaxWorkShare | 0.50 | worker 的最高处理时间占比 |
+| backfillAimdIncrease | 0.05 | 健康窗口后的线性增量 |
+| backfillAimdDecrease | 0.50 | 繁忙采样时的乘性降幅 |
 | backfillPauseRssMiB | 1024 | 暂停回填的 dsh RSS 阈值 |
 | snapshotEventLimit | 256 | 单次 Snapshot 返回的明细行上限 |
 | snapshotScanBatchRows | 256 | Snapshot 每个 event-loop 回合读取的行数 |
 
-高级阈值也可配置：backfillRecoverySamples、backfillBusyEventLoopUtilization、backfillPauseEventLoopUtilization、backfillBusyEventLoopDelayMs、backfillPauseEventLoopDelayMs 和 backfillPauseAvailableMemoryMiB。
+高级阈值也可配置：backfillRecoverySamples、backfillBusyEventLoopUtilization、backfillPauseEventLoopUtilization、backfillBusyEventLoopDelayMs、backfillPauseEventLoopDelayMs 和 backfillPauseAvailableMemoryMiB。AIMD 的 work share 会转换为每个 worker slice 之间的等待时间。
 
 ## Snapshot API
 

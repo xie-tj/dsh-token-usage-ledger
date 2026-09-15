@@ -390,14 +390,25 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
         }))
       },
     )
-    if (readStatus !== undefined) {
+    return () => { current = false }
+  }, [model, period, provider, readSnapshot, readStatus, request])
+
+  useEffect(() => {
+    if (readStatus === undefined) return
+    let current = true
+    const update = (): void => {
       void readStatus().then(
-        (status) => { if (current) setWorkerStatus(status) },
+        status => { if (current) setWorkerStatus(status) },
         () => { if (current) setWorkerStatus(undefined) },
       )
     }
-    return () => { current = false }
-  }, [model, period, provider, readSnapshot, readStatus, request])
+    update()
+    const timer = setInterval(update, 2_000)
+    return () => {
+      current = false
+      clearInterval(timer)
+    }
+  }, [readStatus])
 
   const snapshot = state.snapshot
   const models = useMemo(
@@ -437,6 +448,9 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
   const activeBucket = target === undefined ? undefined : buckets[target.index]
   const maxTokens = Math.max(1, ...buckets.map(bucket => bucket.input + bucket.output + bucket.cached))
   const tokenText = (value: number): string => fullNumberText(value)
+  const pauseReason = workerStatus?.state === 'paused' && workerStatus.pace?.mode === 'pause'
+    ? workerStatus.pace.reason
+    : undefined
 
   const refresh = (): void => { setRequest(current => current + 1) }
   const exportLedger = (): void => {
@@ -497,8 +511,12 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
           })}
         </p>
       ) : null}
-      {workerStatus?.state === 'paused' && workerStatus.pace?.mode === 'pause' ? (
-        <p className={css.stale} role="status">{t('backfillPaused')}</p>
+      {pauseReason !== undefined ? (
+        <p className={css.stale} role="status">
+          {pauseReason === 'battery' ? t('backfillPausedBattery')
+            : pauseReason === 'memory' ? t('backfillPausedMemory')
+              : t('backfillPausedEventLoop')}
+        </p>
       ) : null}
       <p className={css.updated}>{interpolate(t('updated'), { time: snapshot.updatedAt })}</p>
       {exportResult === undefined ? null : (

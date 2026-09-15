@@ -42,6 +42,9 @@ export declare const zh: {
     updated: string;
     backfillRunning: string;
     backfillPaused: string;
+    backfillPausedBattery: string;
+    backfillPausedMemory: string;
+    backfillPausedEventLoop: string;
     tableModel: string;
     tableRequests: string;
     tableFailed: string;
@@ -96,6 +99,9 @@ export declare const en: {
     updated: string;
     backfillRunning: string;
     backfillPaused: string;
+    backfillPausedBattery: string;
+    backfillPausedMemory: string;
+    backfillPausedEventLoop: string;
     tableModel: string;
     tableRequests: string;
     tableFailed: string;
