@@ -136,7 +136,7 @@ export type UsageLedgerWorkerState = 'idle' | 'running' | 'paused' | 'failed';
 export interface UsageLedgerStatus {
     /** Current worker state; `paused` means historical replay is unsupported/off. */
     readonly state: UsageLedgerWorkerState;
-    /** Number of recent sessions selected for automatic backfill. */
+    /** Number of sessions selected for the current automatic backfill pass. */
     readonly totalSessions: number;
     /** Sessions whose reader pass has completed. */
     readonly processedSessions: number;
@@ -150,6 +150,7 @@ export interface UsageLedgerStatus {
     readonly pace?: Readonly<{
         mode: 'run' | 'pause';
         delayMs: number;
+        workShare: number;
         reason?: 'battery' | 'event-loop' | 'memory';
     }>;
     /** Session currently being read, when one is active. */

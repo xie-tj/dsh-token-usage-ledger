@@ -1,4 +1,4 @@
-/** Adaptive pacing policy for best-effort historical Usage Ledger replay. */
+/** Additive-increase/multiplicative-decrease pacing for historical replay. */
 
 /** Power source as observed by the Host platform probe. */
 export type UsageLedgerPowerSource = 'ac' | 'battery' | 'unknown'
@@ -12,11 +12,19 @@ export interface UsageLedgerLoadSample {
   readonly availableMemoryMiB: number | undefined
 }
 
-/** Configured workload limits used to derive one worker pacing command. */
+/** Configured workload limits and AIMD parameters. */
 export interface UsageLedgerAdaptiveConfig {
   readonly powerMode: 'ac-only' | 'always'
-  readonly minDelayMs: number
+  /** Worker compute budget used to turn a share into a pause interval. */
+  readonly sliceMs: number
   readonly maxDelayMs: number
+  readonly initialWorkShare: number
+  readonly minWorkShare: number
+  readonly maxWorkShare: number
+  /** Additive increase applied after each healthy window. */
+  readonly additiveIncrease: number
+  /** Multiplicative decrease applied when the Host is busy. */
+  readonly multiplicativeDecrease: number
   readonly recoverySamples: number
   readonly busyEventLoopUtilization: number
   readonly pauseEventLoopUtilization: number
@@ -30,50 +38,75 @@ export interface UsageLedgerAdaptiveConfig {
 export interface UsageLedgerPace {
   readonly mode: 'run' | 'pause'
   readonly delayMs: number
+  readonly workShare: number
   readonly reason?: 'battery' | 'event-loop' | 'memory'
 }
 
-/** Stateful fast-backoff / slow-recovery controller. */
+/** Stateful AIMD controller with hard pause gates for power and memory. */
 export class UsageLedgerGovernor {
-  private delayMs: number
+  private workShare: number
   private healthySamples = 0
 
   constructor(private readonly config: UsageLedgerAdaptiveConfig) {
-    this.delayMs = config.minDelayMs
+    this.workShare = config.initialWorkShare
   }
 
   /** Update the worker pace from one Host workload sample. */
   observe(sample: UsageLedgerLoadSample): UsageLedgerPace {
     if (this.config.powerMode === 'ac-only' && sample.powerSource !== 'ac') {
-      this.healthySamples = 0
-      return { mode: 'pause', delayMs: this.config.maxDelayMs, reason: 'battery' }
+      return this.paused('battery')
     }
     if (sample.rssMiB >= this.config.pauseRssMiB
       || (this.config.pauseAvailableMemoryMiB > 0
         && sample.availableMemoryMiB !== undefined
         && sample.availableMemoryMiB <= this.config.pauseAvailableMemoryMiB)) {
-      this.healthySamples = 0
-      return { mode: 'pause', delayMs: this.config.maxDelayMs, reason: 'memory' }
+      return this.paused('memory')
     }
     if (sample.eventLoopUtilization >= this.config.pauseEventLoopUtilization
       || sample.eventLoopDelayMs >= this.config.pauseEventLoopDelayMs) {
-      this.healthySamples = 0
-      return { mode: 'pause', delayMs: this.config.maxDelayMs, reason: 'event-loop' }
+      return this.paused('event-loop')
     }
     if (sample.eventLoopUtilization >= this.config.busyEventLoopUtilization
       || sample.eventLoopDelayMs >= this.config.busyEventLoopDelayMs) {
       this.healthySamples = 0
-      this.delayMs = Math.min(
-        this.config.maxDelayMs,
-        Math.max(this.config.minDelayMs, Math.max(1, this.delayMs) * 2),
+      this.workShare = Math.max(
+        this.config.minWorkShare,
+        this.workShare * this.config.multiplicativeDecrease,
       )
-      return { mode: 'run', delayMs: this.delayMs, reason: 'event-loop' }
+      return this.current('run', 'event-loop')
     }
     this.healthySamples += 1
     if (this.healthySamples >= this.config.recoverySamples) {
       this.healthySamples = 0
-      this.delayMs = Math.max(this.config.minDelayMs, Math.floor(this.delayMs * 0.75))
+      this.workShare = Math.min(
+        this.config.maxWorkShare,
+        this.workShare + this.config.additiveIncrease,
+      )
     }
-    return { mode: 'run', delayMs: this.delayMs }
+    return this.current('run')
+  }
+
+  private paused(reason: 'battery' | 'event-loop' | 'memory'): UsageLedgerPace {
+    this.healthySamples = 0
+    this.workShare = this.config.minWorkShare
+    return this.current('pause', reason)
+  }
+
+  private current(
+    mode: 'run' | 'pause',
+    reason?: 'battery' | 'event-loop' | 'memory',
+  ): UsageLedgerPace {
+    const delayMs = mode === 'pause'
+      ? this.config.maxDelayMs
+      : Math.min(
+        this.config.maxDelayMs,
+        Math.max(0, Math.ceil(this.config.sliceMs * (1 / this.workShare - 1))),
+      )
+    return {
+      mode,
+      delayMs,
+      workShare: this.workShare,
+      ...(reason === undefined ? {} : { reason }),
+    }
   }
 }
