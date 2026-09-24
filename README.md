@@ -41,7 +41,7 @@ JSONL persistence 提供 provider-owned 流式 session header lister，因此主
     dsh plugin --profile web add github:xie-tj/dsh-token-usage-ledger#<commit-sha>
     pnpm dsh web
 
-安装包已包含 Host、Client、Typert 和 worker 的编译产物，不依赖安装时构建。
+本版本面向 DSH 0.1.7-rc.1 及以上的 0.1.x（peerDependencies 为 `^0.1.7-rc.1`）。安装包已包含 Host、Client、Typert 和 worker 的编译产物，不依赖安装时构建。
 
 打开 Settings → Usage 查看最近 7 天或 30 天的数据。筛选提供方或模型时，页面向 Host 请求该筛选的数据库聚合，而不是把全部 request 明细传入浏览器。
 

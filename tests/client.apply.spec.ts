@@ -27,14 +27,12 @@ interface Injection {
   disposeEntry?: () => void
 }
 
-function bench(options: { served?: boolean; remote?: boolean; ensure?: Promise<void> } = {}) {
+function bench(options: { remote?: boolean } = {}) {
   const entries: Entry[] = []
   const declarations = new Set<string>()
   const injections = new Map<string, Set<Injection>>()
   const effectDisposers: Array<() => void> = []
   const dictionaries = new Map<string, Record<string, string>>()
-  const describeListeners = new Set<() => void>()
-  let served = options.served ?? false
   let failedRegistration: string | undefined
   const remoteNamespace = {
     snapshot: vi.fn(async () => ({
@@ -102,24 +100,11 @@ function bench(options: { served?: boolean; remote?: boolean; ensure?: Promise<v
       }
     }),
   }
-  const settingsScope = {
-    describe: vi.fn(() => ({
-      getSnapshot: () => ({
-        view: { namespaces: served ? [{ ns: 'usage-ledger' }] : [] },
-      }),
-      subscribe: (listener: () => void) => {
-        describeListeners.add(listener)
-        return () => { describeListeners.delete(listener) }
-      },
-      ensure: vi.fn(() => options.ensure ?? Promise.resolve()),
-    })),
-  }
   const logger = { warn: vi.fn() }
   const ctx = {
     remote,
     locale,
     slots,
-    settingsScope,
     logger,
     get(name: string) {
       return name === 'remote.usageLedgerPlugin' ? remoteValue : undefined
@@ -147,10 +132,6 @@ function bench(options: { served?: boolean; remote?: boolean; ensure?: Promise<v
         }
       }
     },
-    setServed(value: boolean) {
-      served = value
-      for (const listener of describeListeners) listener()
-    },
     failRegistration(name: string) {
       failedRegistration = name
     },
@@ -173,18 +154,17 @@ describe('Usage client apply', () => {
     cardCssDisposer.mockClear()
   })
 
-  it('follows Host namespace availability without duplicate display contributions', async () => {
-    expect(inject).toEqual(['slots', 'locale', 'remote', 'settingsScope'])
+  it('registers the Settings section and Plugins page once their slots are declared', async () => {
+    expect(inject).toEqual(['slots', 'locale', 'remote'])
     const b = bench()
-    b.declare('settings.section')
-    b.declare('settings.plugin.item')
     const applyDisposer = await apply(b.ctx as never)
     expect(cssInstall).toHaveBeenCalledOnce()
     expect(cardCssInstall).toHaveBeenCalledOnce()
     expect(b.entries).toHaveLength(0)
 
-    b.setServed(true)
-    expect(entryNames(b.entries)).toEqual(['settings.plugin.item', 'settings.section'])
+    b.declare('settings.section')
+    b.declare('plugins.item')
+    expect(entryNames(b.entries)).toEqual(['plugins.item', 'settings.section'])
     expect(b.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
         component: UsageDashboard,
@@ -192,17 +172,10 @@ describe('Usage client apply', () => {
       }),
       expect.objectContaining({
         component: UsagePluginCard,
-        options: expect.objectContaining({ key: 'usage-ledger', locale: 'settings.usage' }),
+        options: expect.objectContaining({ id: 'usage-ledger', order: 30, locale: 'settings.usage' }),
       }),
     ]))
     expect(b.locale.bind('settings.usage')('nav')).toBe('用量')
-
-    b.setServed(true)
-    expect(b.entries).toHaveLength(2)
-    b.setServed(false)
-    expect(b.entries).toHaveLength(0)
-    b.setServed(true)
-    expect(b.entries).toHaveLength(2)
 
     await b.dispose(applyDisposer)
     expect(b.entries).toHaveLength(0)
@@ -211,20 +184,20 @@ describe('Usage client apply', () => {
     expect(b.locale.bind('settings.usage')('nav')).toBe('nav')
   })
 
-  it('supports settings slots declared after Host availability', async () => {
-    const b = bench({ served: true })
+  it('supports slots declared after apply and collapses each contribution independently', async () => {
+    const b = bench()
     const applyDisposer = await apply(b.ctx as never)
     expect(b.entries).toHaveLength(0)
 
     const collapseSection = b.declare('settings.section')
     expect(entryNames(b.entries)).toEqual(['settings.section'])
-    const collapsePluginItem = b.declare('settings.plugin.item')
-    expect(entryNames(b.entries)).toEqual(['settings.plugin.item', 'settings.section'])
+    const collapsePluginItem = b.declare('plugins.item')
+    expect(entryNames(b.entries)).toEqual(['plugins.item', 'settings.section'])
 
     collapseSection()
-    expect(entryNames(b.entries)).toEqual(['settings.plugin.item'])
+    expect(entryNames(b.entries)).toEqual(['plugins.item'])
     b.declare('settings.section')
-    expect(entryNames(b.entries)).toEqual(['settings.plugin.item', 'settings.section'])
+    expect(entryNames(b.entries)).toEqual(['plugins.item', 'settings.section'])
     collapsePluginItem()
     await b.dispose(applyDisposer)
     expect(b.entries).toHaveLength(0)
@@ -233,25 +206,11 @@ describe('Usage client apply', () => {
   it('rolls back a partial display registration', async () => {
     const b = bench()
     b.declare('settings.section')
-    b.declare('settings.plugin.item')
-    b.failRegistration('settings.plugin.item')
-    const applyDisposer = await apply(b.ctx as never)
+    b.declare('plugins.item')
+    b.failRegistration('plugins.item')
 
-    expect(() => { b.setServed(true) }).toThrow('failed settings.plugin.item')
+    await expect(apply(b.ctx as never)).rejects.toThrow('failed plugins.item')
     expect(b.entries).toHaveLength(0)
-    await b.dispose(applyDisposer)
-  })
-
-  it('contains a rejected Host availability read', async () => {
-    const failure = new Error('describe failed')
-    const b = bench({ ensure: Promise.reject(failure) })
-    const applyDisposer = await apply(b.ctx as never)
-    await Promise.resolve()
-    await Promise.resolve()
-
-    expect(b.logger.warn).toHaveBeenCalledWith('dsh-usage-ledger: Host namespace reconciliation failed')
-    expect(b.logger.warn).toHaveBeenCalledWith(failure)
-    await b.dispose(applyDisposer)
   })
 
   it('does not mount a duplicate Remote namespace when Host already provides it', async () => {

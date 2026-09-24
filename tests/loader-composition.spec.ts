@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
 import Include, { type PatchOptions } from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import { load as parseYaml } from 'js-yaml'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as usageLedgerPlugin from 'dsh-plugin-usage-ledger'
@@ -32,17 +32,21 @@ describe('Usage Ledger Loader composition', () => {
         data: { provider: 'deepseek', model: 'deepseek-chat' },
       },
       {
-        type: 'assistant/chunk',
+        type: 'assistant/attempt',
         seq: 1,
         time: eventTime + 1,
         data: {
           turn: 0,
           step: 0,
-          chunk: { type: 'usage', usage: { inputTokens: 17, outputTokens: 9 } },
+          stream: [{
+            type: 'chunk',
+            time: eventTime + 1,
+            chunk: { type: 'usage', usage: { inputTokens: 17, outputTokens: 9 } },
+          }],
         },
       },
     ] as never, {
-      version: 0,
+      version: SESSION_FORMAT_VERSION,
       id: sessionId,
       createdAt: eventTime,
       cwd: '/loader-composition',

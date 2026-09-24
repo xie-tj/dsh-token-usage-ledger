@@ -9,7 +9,6 @@ import { dirname, join, resolve } from 'node:path'
 import { monitorEventLoopDelay, performance } from 'node:perf_hooks'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-llm-retry'
 import { Session } from '@deepseek-ai/dsh-session'
 import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
@@ -88,11 +87,6 @@ const DEFAULT_PAUSE_DELAY_MS = 150
 const DEFAULT_PAUSE_RSS_MIB = 1_024
 const DEFAULT_PAUSE_AVAILABLE_MIB = 0
 const POWER_PROBE_INTERVAL_MS = 30_000
-
-/** Settings namespace used to expose the read-only Usage card in Plugins settings. */
-export const USAGE_LEDGER_SETTINGS_NAMESPACE = 'usage-ledger' as const
-type UsageLedgerSettings = Readonly<Record<string, never>>
-const UsageLedgerSettingsSchema = z.object({}) as unknown as z<UsageLedgerSettings>
 
 /** Enable or disable the isolated historical reader process. */
 export type UsageLedgerBackfillMode = 'process' | 'off'
@@ -419,6 +413,14 @@ function validateReaderSpec(value: unknown): WorkerReaderSpec | undefined {
   return value as unknown as WorkerReaderSpec
 }
 
+/** Keep only the usage and finish records the ledger folds across the worker boundary. */
+function compactAttemptStream(
+  stream: SessionEvent<'assistant/attempt'>['data']['stream'],
+): SessionEvent<'assistant/attempt'>['data']['stream'] {
+  return stream.filter(record => record.type === 'chunk'
+    && (record.chunk.type === 'usage' || record.chunk.type === 'finish'))
+}
+
 /** Copy only usage-bearing event fields across the process boundary. */
 function compactEvent(event: SessionEvent): UsageSessionEvent | undefined {
   const base = { seq: event.seq, time: event.time }
@@ -445,22 +447,16 @@ function compactEvent(event: SessionEvent): UsageSessionEvent | undefined {
       }
     case 'turn/end':
       return { ...base, type: event.type, data: { turn: event.data.turn, reason: { kind: event.data.reason.kind } } } as UsageSessionEvent
-    case 'assistant/chunk':
-      if (event.data.chunk.type === 'usage') {
-        return {
-          ...base,
-          type: event.type,
-          data: { turn: event.data.turn, step: event.data.step, chunk: { type: 'usage', usage: event.data.chunk.usage } },
-        } as UsageSessionEvent
-      }
-      if (event.data.chunk.type === 'finish') {
-        return {
-          ...base,
-          type: event.type,
-          data: { turn: event.data.turn, step: event.data.step, chunk: { type: 'finish', reason: { kind: event.data.chunk.reason.kind } } },
-        } as UsageSessionEvent
-      }
-      return undefined
+    case 'assistant/attempt':
+      return {
+        ...base,
+        type: event.type,
+        data: {
+          turn: event.data.turn,
+          step: event.data.step,
+          stream: compactAttemptStream(event.data.stream),
+        },
+      } as unknown as UsageSessionEvent
     case 'assistant/message':
       return {
         ...base,
@@ -620,9 +616,6 @@ export class UsageLedgerService extends TypertRemoteService {
     this.worker = new UsageWorkerSupervisor({
       onResponse: frame => this.handleWorkerResponse(frame),
       onFailure: message => this.recordFailure(message),
-    })
-    ctx.inject(['settings'], (settingsCtx) => {
-      settingsCtx.settings.register(USAGE_LEDGER_SETTINGS_NAMESPACE, UsageLedgerSettingsSchema)
     })
   }
 

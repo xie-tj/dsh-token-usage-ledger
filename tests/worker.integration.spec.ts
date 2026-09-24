@@ -25,8 +25,19 @@ describe('Usage Ledger worker integration', () => {
     const events = [
       { type: 'request/context', seq: 0, time: eventTime, data: { provider: 'deepseek', model: 'chat' } },
       { type: 'step/start', seq: 1, time: eventTime + 1, data: { turn: 0, step: 0 } },
-      { type: 'assistant/chunk', seq: 2, time: eventTime + 2, data: { turn: 0, step: 0, chunk: { type: 'usage', usage: { inputTokens: 12, outputTokens: 8 } } } },
-      { type: 'assistant/message', seq: 3, time: eventTime + 3, data: { turn: 0, step: 0, usage: { inputTokens: 12, outputTokens: 8 } } },
+      {
+        type: 'assistant/attempt',
+        seq: 2,
+        time: eventTime + 2,
+        data: {
+          turn: 0,
+          step: 0,
+          stream: [
+            { type: 'chunk', time: eventTime + 2, chunk: { type: 'usage', usage: { inputTokens: 12, outputTokens: 8 } } },
+            { type: 'chunk', time: eventTime + 3, chunk: { type: 'finish', reason: { kind: 'stop' } } },
+          ],
+        },
+      },
     ]
     const ctx = new Context()
     ctx.provide('sessions', { list: () => [], get: () => undefined } as never)

@@ -67,6 +67,22 @@ function routeAfter(route: UsageRoute, event: UsageSessionEvent): UsageRoute {
   return route
 }
 
+/** The attempt stream's reported usage, when the adapter emitted one. */
+function attemptUsage(event: Extract<UsageSessionEvent, { type: 'assistant/attempt' }>): TokenUsage | undefined {
+  for (const record of event.data.stream) {
+    if (record.type === 'chunk' && record.chunk.type === 'usage') return record.chunk.usage
+  }
+  return undefined
+}
+
+/** The attempt stream's terminal finish kind, when it reached one. */
+function attemptFinishKind(event: Extract<UsageSessionEvent, { type: 'assistant/attempt' }>): string | undefined {
+  for (const record of event.data.stream) {
+    if (record.type === 'chunk' && record.chunk.type === 'finish') return record.chunk.reason.kind
+  }
+  return undefined
+}
+
 /**
  * Fold one session at a time. The reducer retains only active attempts, so a
  * multi-year ledger never becomes a worker heap.
@@ -183,14 +199,20 @@ export class UsageLedgerReducer {
             : current
       case 'llm/retry':
         return this.processRetry(session, current, event, sink)
-      case 'assistant/chunk':
-        if (event.data.chunk.type === 'usage') {
-          return this.recordProvisionalUsage(session, current, event, route, event.data.chunk.usage, sink)
+      case 'assistant/attempt': {
+        let next = current
+        const usage = attemptUsage(event)
+        if (usage !== undefined) {
+          next = this.recordProvisionalUsage(
+            session, next, event.data.turn, event.data.step, event.time, event.seq, route, usage, sink,
+          )
         }
-        if (event.data.chunk.type === 'finish') {
-          return this.recordFinish(session, current, event, event.data.chunk.reason.kind, sink)
+        const kind = attemptFinishKind(event)
+        if (kind !== undefined) {
+          next = this.recordFinish(session, next, event.data.turn, event.data.step, kind, sink)
         }
-        return current
+        return next
+      }
       case 'assistant/message':
         return this.processAssistantMessage(session, current, event, route, sink)
       default:
@@ -279,11 +301,12 @@ export class UsageLedgerReducer {
   private recordFinish(
     session: LedgerSession,
     current: UsageLedgerSessionRow,
-    event: Extract<UsageSessionEvent, { type: 'assistant/chunk' }>,
+    turn: number,
+    step: number,
     kind: string,
     sink: MutationSink,
   ): UsageLedgerSessionRow {
-    const attemptId = current.activeAttempts[stepKey(event.data.turn, event.data.step)]
+    const attemptId = current.activeAttempts[stepKey(turn, step)]
     if (attemptId === undefined) return current
     const key = callKey(session, attemptId)
     const row = this.calls.get(key)
@@ -358,29 +381,32 @@ export class UsageLedgerReducer {
   private recordProvisionalUsage(
     session: LedgerSession,
     current: UsageLedgerSessionRow,
-    event: Extract<UsageSessionEvent, { type: 'assistant/chunk' }>,
+    turn: number,
+    step: number,
+    time: number,
+    seq: number,
     route: UsageRoute,
     usage: TokenUsage,
     sink: MutationSink,
   ): UsageLedgerSessionRow {
-    const step = stepKey(event.data.turn, event.data.step)
-    const attemptId = current.activeAttempts[step] ?? createUsageAttemptId(`stream:${event.data.turn}:${event.data.step}:${event.seq}`)
+    const stepId = stepKey(turn, step)
+    const attemptId = current.activeAttempts[stepId] ?? createUsageAttemptId(`stream:${turn}:${step}:${seq}`)
     const key = callKey(session, attemptId)
     const existing = this.calls.get(key)
     const row = existing ?? {
       sessionId: session.id,
       createdAt: session.createdAt,
       ...(session.cwd === undefined ? {} : { workspace: session.cwd }),
-      day: new Date(event.time).toISOString().slice(0, 10),
+      day: new Date(time).toISOString().slice(0, 10),
       attemptId,
-      turn: event.data.turn,
-      step: event.data.step,
+      turn,
+      step,
       provider: route.provider,
       model: route.model,
-      startedAt: event.time,
+      startedAt: time,
     }
     this.putCall(key, { ...row, provisionalUsage: usageOf(usage) }, sink)
-    return { ...current, activeAttempts: { ...current.activeAttempts, [step]: attemptId } }
+    return { ...current, activeAttempts: { ...current.activeAttempts, [stepId]: attemptId } }
   }
 
   private processRetry(

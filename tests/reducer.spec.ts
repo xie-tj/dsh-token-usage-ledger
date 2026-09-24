@@ -28,8 +28,14 @@ describe('UsageLedgerReducer', () => {
     const mutations = reducer.applyBatch(session, [
       event(0, 'request/context', { provider: 'deepseek', model: 'chat' }),
       event(1, 'step/start', { turn: 0, step: 0 }),
-      event(2, 'assistant/chunk', { turn: 0, step: 0, chunk: { type: 'usage', usage: { inputTokens: 7, outputTokens: 4 } } }),
-      event(3, 'assistant/chunk', { turn: 0, step: 0, chunk: { type: 'finish', reason: { kind: 'stop' } } }),
+      event(2, 'assistant/attempt', {
+        turn: 0,
+        step: 0,
+        stream: [
+          { type: 'chunk', time: session.createdAt + 2, chunk: { type: 'usage', usage: { inputTokens: 7, outputTokens: 4 } } },
+          { type: 'chunk', time: session.createdAt + 3, chunk: { type: 'finish', reason: { kind: 'stop' } } },
+        ],
+      }),
       event(4, 'assistant/message', { turn: 0, step: 0, usage: { inputTokens: 7, outputTokens: 4 } }),
     ])
     const calls = finalCalls(mutations)
@@ -50,12 +56,24 @@ describe('UsageLedgerReducer', () => {
     const mutations = reducer.applyBatch(session, [
       event(0, 'request/context', { provider: 'deepseek', model: 'chat' }),
       event(1, 'step/start', { turn: 0, step: 0 }),
-      event(2, 'assistant/chunk', { turn: 0, step: 0, chunk: { type: 'usage', usage: { inputTokens: 3, outputTokens: 2 } } }),
-      event(3, 'assistant/chunk', { turn: 0, step: 0, chunk: { type: 'finish', reason: { kind: 'error' } } }),
+      event(2, 'assistant/attempt', {
+        turn: 0,
+        step: 0,
+        stream: [
+          { type: 'chunk', time: session.createdAt + 2, chunk: { type: 'usage', usage: { inputTokens: 3, outputTokens: 2 } } },
+          { type: 'chunk', time: session.createdAt + 3, chunk: { type: 'finish', reason: { kind: 'error' } } },
+        ],
+      }),
       event(4, 'llm/retry', { turn: 0, step: 0 }),
       event(5, 'llm/retry-started', { retryId: 'retry-1', turn: 0, step: 0, retry: 1 }),
-      event(6, 'assistant/chunk', { turn: 0, step: 0, chunk: { type: 'usage', usage: { inputTokens: 5, outputTokens: 3 } } }),
-      event(7, 'assistant/chunk', { turn: 0, step: 0, chunk: { type: 'finish', reason: { kind: 'stop' } } }),
+      event(6, 'assistant/attempt', {
+        turn: 0,
+        step: 0,
+        stream: [
+          { type: 'chunk', time: session.createdAt + 6, chunk: { type: 'usage', usage: { inputTokens: 5, outputTokens: 3 } } },
+          { type: 'chunk', time: session.createdAt + 7, chunk: { type: 'finish', reason: { kind: 'stop' } } },
+        ],
+      }),
       event(8, 'assistant/message', { turn: 0, step: 0, usage: { inputTokens: 5, outputTokens: 3 } }),
     ])
     const calls = [...finalCalls(mutations)].sort((left, right) => left.startedAt - right.startedAt)

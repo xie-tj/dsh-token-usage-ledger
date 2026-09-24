@@ -13,8 +13,6 @@ declare module '@deepseek-ai/cordis' {
         usageLedger: UsageLedgerService;
     }
 }
-/** Settings namespace used to expose the read-only Usage card in Plugins settings. */
-export declare const USAGE_LEDGER_SETTINGS_NAMESPACE: "usage-ledger";
 /** Enable or disable the isolated historical reader process. */
 export type UsageLedgerBackfillMode = 'process' | 'off';
 /** Select automatic replay for all retained history or only the priority window. */

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Context } from '@deepseek-ai/cordis'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { Session, SESSION_FORMAT_VERSION, SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it, vi } from 'vitest'
 import type {} from '../lib/types/host/index.js'
 // The packed root entry intentionally has no sibling declaration; typecheck:host
@@ -15,7 +15,7 @@ async function setup(config: ConstructorParameters<typeof UsageLedgerService>[1]
   const root = await mkdtemp(join(tmpdir(), 'dsh-usage-ledger-host-'))
   const id = SessionId('usage-ledger-live-' + Math.random())
   const session = Session.create(id, undefined, {
-    version: 0,
+    version: SESSION_FORMAT_VERSION,
     id,
     createdAt: Date.now(),
     cwd: '/live',
@@ -101,13 +101,17 @@ describe('UsageLedgerService lifecycle', () => {
       await test.fiber.await()
       const now = Date.now()
       test.ctx.emit('session/event', test.session, {
-        type: 'assistant/chunk',
+        type: 'assistant/attempt',
         seq: 0,
         time: now,
         data: {
           turn: 0,
           step: 0,
-          chunk: { type: 'usage', usage: { inputTokens: 7, outputTokens: 4, cacheReadTokens: 2, cacheWriteTokens: 1 } },
+          stream: [{
+            type: 'chunk',
+            time: now,
+            chunk: { type: 'usage', usage: { inputTokens: 7, outputTokens: 4, cacheReadTokens: 2, cacheWriteTokens: 1 } },
+          }],
         },
       } as never)
       await waitFor(async () => {

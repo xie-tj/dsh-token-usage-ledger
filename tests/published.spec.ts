@@ -28,7 +28,7 @@ describe('published package', () => {
     expect(Object.keys(types)).toEqual([])
     expect(packageJson.name).toBe('dsh-plugin-usage-ledger')
     expect(client.registration.id).toBe('dsh-plugin-usage-ledger')
-    expect(client.plugin).toMatchObject({ inject: ['slots', 'locale', 'remote', 'settingsScope'] })
+    expect(client.plugin).toMatchObject({ inject: ['slots', 'locale', 'remote'] })
     expect(client.plugin).toHaveProperty('apply')
   })
 

@@ -1,10 +1,12 @@
 /** Browser-side Usage Settings page and Plugins configuration card. */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
-// Type-only: pulls the settings slot declarations into this compilation unit.
-import type { SettingsDescribeFace } from '@deepseek-ai/dsh-client-ui-settings/client'
-// Type-only: pulls the Plugins configuration card slot declaration into this compilation unit.
-import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+// Type-only: pulls the settings shell's SlotMap merge (the 'settings.section' entry).
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+// Type-only: pulls the Plugins page's SlotMap merge (the 'plugins.item' entry).
+import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
+// Type-only: pulls the renderer's Context merge (ctx.slots).
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls the locale Context merge into this compilation unit.
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Type-only: pulls the generated Remote Context merge into this compilation unit.
@@ -24,7 +26,6 @@ import { en, zh, type UsageLocaleKey } from './locales.ts'
 
 /** Dictionary namespace owned by this package. */
 const NS = 'settings.usage'
-const USAGE_LEDGER_NAMESPACE = 'usage-ledger'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -34,40 +35,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Required Cordis services; the local Remote contribution is mounted during apply. */
-export const inject = ['slots', 'locale', 'remote', 'settingsScope']
-
-/** Register the Usage display contributions only while their Host namespace is served. */
-function registerUsageWhileServed(
-  describe: SettingsDescribeFace,
-  register: () => () => void,
-  reportFailure: (error: unknown) => void,
-): () => void {
-  let stopped = false
-  let dispose: (() => void) | undefined
-  const reconcile = (): void => {
-    if (stopped) return
-    const served = describe.getSnapshot().view?.namespaces.some(
-      ({ ns }) => ns === USAGE_LEDGER_NAMESPACE,
-    ) ?? false
-    if (served && dispose === undefined) {
-      dispose = register()
-    } else if (!served && dispose !== undefined) {
-      dispose()
-      dispose = undefined
-    }
-  }
-  const unsubscribe = describe.subscribe(reconcile)
-  void describe.ensure().then(reconcile).catch((error: unknown) => {
-    if (!stopped) reportFailure(error)
-  })
-  reconcile()
-  return () => {
-    stopped = true
-    unsubscribe()
-    dispose?.()
-    dispose = undefined
-  }
-}
+export const inject = ['slots', 'locale', 'remote']
 
 /**
  * Decode the generated Remote result envelope while accepting a direct snapshot
@@ -96,7 +64,7 @@ function unpackExport(response: RemoteResult<UsageLedgerExportResult> | UsageLed
   throw new Error('usageLedgerPlugin.exportCsv failed: ' + result.error.code + ': ' + result.error.message)
 }
 
-/** Register the localized Usage displays while their Host namespace is available. */
+/** Register the localized Usage displays: the Settings section and the Plugins page. */
 export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   // Stock dsh builds that already mount this namespace are reused; older builds
   // receive the generated contribution from this package.
@@ -130,9 +98,8 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         : undefined,
     })
     const t = ctx.locale.bind(NS)
-    const describe = ctx.settingsScope.describe()
 
-    ctx.effect(() => registerUsageWhileServed(describe, () => {
+    ctx.effect(() => {
       const disposers: Array<() => void> = []
       try {
         disposers.push(ctx.slots.inject('settings.section', () => ctx.slots.register({
@@ -143,9 +110,11 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
           locale: NS,
           inject: injected,
         }, UsageDashboard)))
-        disposers.push(ctx.slots.inject('settings.plugin.item', () => ctx.slots.register({
-          name: 'settings.plugin.item',
-          key: 'usage-ledger',
+        disposers.push(ctx.slots.inject('plugins.item', () => ctx.slots.register({
+          name: 'plugins.item',
+          id: 'usage-ledger',
+          order: 30,
+          label: () => t('title'),
           locale: NS,
           inject: injected,
         }, UsagePluginCard)))
@@ -156,10 +125,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       return () => {
         for (const dispose of disposers.reverse()) dispose()
       }
-    }, (error) => {
-      ctx.logger.warn('dsh-usage-ledger: Host namespace reconciliation failed')
-      ctx.logger.warn(error)
-    }), 'dsh-usage-ledger: Host namespace')
+    }, 'dsh-usage-ledger: pages')
 
     return async () => {
       if (disposeRemote !== undefined) await disposeRemote()

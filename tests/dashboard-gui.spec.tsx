@@ -185,7 +185,7 @@ describe('Usage dashboard GUI', () => {
     }
   })
 
-  it('loads the dashboard only after its Plugins card expands', async () => {
+  it('renders the one-liner for the summary view and the dashboard for the page view', async () => {
     const container = document.createElement('div')
     document.body.appendChild(container)
     const root = createRoot(container)
@@ -196,25 +196,26 @@ describe('Usage dashboard GUI', () => {
       await act(async () => {
         root.render(
           <UsagePluginCard
+            view="summary"
             readSnapshot={readSnapshot}
             t={translate as never}
-            useSessions={vi.fn() as never}
-            useWorkspaces={vi.fn() as never}
           />,
         )
       })
-      const toggle = container.querySelector('button')
-      expect(toggle?.getAttribute('aria-expanded')).toBe('false')
-      expect(container.textContent).toContain('title')
       expect(container.textContent).toContain('intro')
       expect(readSnapshot).not.toHaveBeenCalled()
 
       await act(async () => {
-        toggle?.click()
+        root.render(
+          <UsagePluginCard
+            view="page"
+            readSnapshot={readSnapshot}
+            t={translate as never}
+          />,
+        )
         await Promise.resolve()
         await Promise.resolve()
       })
-      expect(toggle?.getAttribute('aria-expanded')).toBe('true')
       expect(readSnapshot).toHaveBeenCalledOnce()
       expect(container.textContent).toContain('chat')
     } finally {

@@ -1,49 +1,29 @@
-/** Read-only Usage dashboard card contributed to Plugins settings. */
-import { useId, useState } from 'react'
+/** Usage dashboard page contributed to the Plugins settings page. */
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type {} from '@deepseek-ai/dsh-client-ui-settings-plugins/client'
+import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import { UsageDashboard } from './UsageDashboard.tsx'
 import type { UsageDashboardInjected } from './UsageDashboard.tsx'
 import * as styles from './UsagePluginCard.module.css'
 
 const css = styles.default
 
-/** Install the Plugins card stylesheet and return its disposer. */
+/** Install the Plugins page stylesheet and return its disposer. */
 export function installUsagePluginCardStyles(): () => void {
   return typeof styles.install === 'function' ? styles.install() : () => {}
 }
 
-/** Props composed by the keyed plugin-card slot. */
+/** Props composed by the Plugins page's item slot. */
 type UsagePluginCardProps =
-  PropsRuntime<'settings.plugin.item'>
+  PropsRuntime<'plugins.item'>
   & PropsLocale<'settings.usage'>
   & InjectFace<UsageDashboardInjected>
 
-/** Render the Usage dashboard as a read-only expandable plugin card. */
-export function UsagePluginCard({ t, readSnapshot, readStatus, exportCsv }: UsagePluginCardProps) {
-  const [open, setOpen] = useState(false)
-  const bodyId = useId()
+/** Render the Usage one-liner or the full dashboard, as the Plugins page asks. */
+export function UsagePluginCard({ view, t, readSnapshot, readStatus, exportCsv }: UsagePluginCardProps) {
+  if (view === 'summary') return t('intro')
   return (
-    <li className={`${css.card} ${open ? css.cardOpen : ''}`}>
-      <button
-        type="button"
-        className={css.header}
-        aria-expanded={open}
-        aria-controls={bodyId}
-        aria-label={`${t(open ? 'collapse' : 'expand')}: ${t('title')}`}
-        onClick={() => { setOpen(current => !current) }}
-      >
-        <span className={css.headText}>
-          <span className={css.name}>{t('title')}</span>
-          <span className={css.description}>{t('intro')}</span>
-        </span>
-        <span className={`${css.chevron} ${open ? css.chevronOpen : ''}`} aria-hidden="true">⌄</span>
-      </button>
-      {open ? (
-        <div id={bodyId} className={css.body}>
-          <UsageDashboard t={t} readSnapshot={readSnapshot} readStatus={readStatus} exportCsv={exportCsv} />
-        </div>
-      ) : null}
-    </li>
+    <div className={css.body}>
+      <UsageDashboard t={t} readSnapshot={readSnapshot} readStatus={readStatus} exportCsv={exportCsv} />
+    </div>
   )
 }
