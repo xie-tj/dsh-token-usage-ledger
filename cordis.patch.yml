@@ -1,13 +1,5 @@
-# Disable the built-in Usage rows when this bundle is layered onto the stock Web profile.
-# The target rows are optional: profiles without them simply receive this bundle.
-- id: usage-ledger
-  name: '@deepseek-ai/dsh-usage-ledger'
-  disabled: true
-
-- id: ui-settings-usage
-  name: '@deepseek-ai/dsh-client-ui-settings-usage'
-  disabled: true
-
+# Stock 0.2.0 profiles ship no built-in Usage rows, so this bundle only inserts its
+# own ledger row and leaves the profile's model and search routes untouched.
 - insert:
     - id: usage-ledger-plugin
       name: 'dsh-plugin-usage-ledger'
