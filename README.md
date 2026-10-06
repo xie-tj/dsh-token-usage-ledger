@@ -47,6 +47,8 @@ JSONL persistence 提供 provider-owned 流式 session header lister，因此主
 
 同一个仪表盘也挂在插件页里本包自己的行上（plugins.row.config，键为 dsh-plugin-usage-ledger#usage-ledger-plugin）。plugins.item 属于官方设置页，本包不占用它，因此不会出现在官方分组里。
 
+设置导航栏里「用量」行的图标由本插件通过 settings.section.glyph 绘制（outline 柱状图）。该 seat 是较新 DSH 的外壳能力：外壳没有声明它时贡献保持 pending，导航行继续使用外壳自带图标，其余功能不受影响。
+
 页面默认显示全部历史的汇总。Export CSV 会把当前筛选的完整 call 记录按 SQLite 页流式写入 owner-only 文件，完成后显示保存路径；导出不会把整份 CSV 或整本账本装入浏览器内存。
 
 ## 配置

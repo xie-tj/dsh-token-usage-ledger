@@ -21,6 +21,7 @@ import type {
 } from '../host/types.ts'
 import { installUsageStyles, UsageDashboard } from './UsageDashboard.tsx'
 import type { UsageDashboardInjected } from './UsageDashboard.tsx'
+import { UsageLedgerGlyph } from './UsageLedgerGlyph.tsx'
 import { installUsagePluginCardStyles, UsagePluginCard } from './UsagePluginCard.tsx'
 import { en, zh, type UsageLocaleKey } from './locales.ts'
 
@@ -38,6 +39,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Usage dashboard copy. */
     'settings.usage': UsageLocaleKey
+  }
+
+  interface SlotMap {
+    /**
+     * Settings nav glyph seat. A shell without it never declares the key, so
+     * the contribution stays pending and that shell keeps its own glyph.
+     */
+    'settings.section.glyph': { kind: 'keyed'; scope: 'root'; owner: { readonly size: number } }
   }
 }
 
@@ -117,6 +126,10 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
           locale: NS,
           inject: injected,
         }, UsageDashboard)))
+        disposers.push(ctx.slots.inject('settings.section.glyph', () => ctx.slots.register({
+          name: 'settings.section.glyph',
+          key: 'usage',
+        }, UsageLedgerGlyph)))
         disposers.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
           name: 'plugins.row.config',
           key: PLUGIN_ROW_KEY,

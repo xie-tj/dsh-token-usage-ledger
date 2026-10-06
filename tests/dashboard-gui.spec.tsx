@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { UsageDashboard } from '../src/client/UsageDashboard.tsx'
 import { UsagePluginCard } from '../src/client/UsagePluginCard.tsx'
+import { UsageLedgerGlyph } from '../src/client/UsageLedgerGlyph.tsx'
 import type { UsageLedgerSnapshot } from '../src/types.ts'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -180,6 +181,24 @@ describe('Usage dashboard GUI', () => {
       })
       expect(container.textContent).toContain('backfillPausedMemory')
       expect(readStatus).toHaveBeenCalled()
+    } finally {
+      await act(async () => { root.unmount() })
+      container.remove()
+    }
+  })
+
+  it('renders the nav glyph at the requested size and keeps it decorative', async () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    try {
+      await act(async () => { root.render(<UsageLedgerGlyph size={16} />) })
+      const svg = container.querySelector('svg')
+      expect(svg?.getAttribute('width')).toBe('16')
+      expect(svg?.getAttribute('height')).toBe('16')
+      expect(svg?.getAttribute('aria-hidden')).toBe('true')
+      expect(svg?.querySelectorAll('rect')).toHaveLength(3)
     } finally {
       await act(async () => { root.unmount() })
       container.remove()

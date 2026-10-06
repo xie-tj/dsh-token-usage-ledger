@@ -6,6 +6,19 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         /** Usage dashboard copy. */
         'settings.usage': UsageLocaleKey;
     }
+    interface SlotMap {
+        /**
+         * Settings nav glyph seat. A shell without it never declares the key, so
+         * the contribution stays pending and that shell keeps its own glyph.
+         */
+        'settings.section.glyph': {
+            kind: 'keyed';
+            scope: 'root';
+            owner: {
+                readonly size: number;
+            };
+        };
+    }
 }
 /** Required Cordis services; the local Remote contribution is mounted during apply. */
 export declare const inject: string[];

@@ -16,6 +16,7 @@ vi.mock('../src/client/UsagePluginCard.module.css', () => ({
 import { apply, inject } from '../src/client/index.ts'
 import { UsageDashboard } from '../src/client/UsageDashboard.tsx'
 import { UsagePluginCard } from '../src/client/UsagePluginCard.tsx'
+import { UsageLedgerGlyph } from '../src/client/UsageLedgerGlyph.tsx'
 
 interface Entry {
   readonly options: Record<string, unknown>
@@ -180,6 +181,15 @@ describe('Usage client apply', () => {
     ]))
     // The Official group belongs to the official settings pages.
     expect(b.entries.some(entry => entry.options.name === 'plugins.item')).toBe(false)
+    // The nav glyph seat is optional: a shell without it never declares the key.
+    expect(entryNames(b.entries)).not.toContain('settings.section.glyph')
+    b.declare('settings.section.glyph')
+    expect(b.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        component: UsageLedgerGlyph,
+        options: expect.objectContaining({ name: 'settings.section.glyph', key: 'usage' }),
+      }),
+    ]))
     expect(b.locale.bind('settings.usage')('nav')).toBe('用量')
 
     await b.dispose(applyDisposer)
