@@ -25,6 +25,25 @@
   margin: 0;
 }
 
+.identity {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.mark {
+  box-sizing: border-box;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  color: var(--dsw-alias-state-business-primary);
+}
+
 .eyebrow {
   color: var(--dsw-alias-label-tertiary);
   font-family: var(--ds-font-family-code);

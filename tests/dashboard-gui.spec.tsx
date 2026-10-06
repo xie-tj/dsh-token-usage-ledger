@@ -92,6 +92,7 @@ describe('Usage dashboard GUI', () => {
         await Promise.resolve()
       })
       expect(readSnapshot).toHaveBeenCalledOnce()
+      expect(container.querySelector('header svg')).not.toBeNull()
       expect(container.textContent).toContain('chat')
       expect(container.textContent).not.toContain('deepseek / chat')
       expect(container.textContent).toContain('modelBreakdown')
@@ -203,6 +204,7 @@ describe('Usage dashboard GUI', () => {
         )
       })
       expect(container.textContent).toContain('intro')
+      expect(container.querySelector('svg')).not.toBeNull()
       expect(readSnapshot).not.toHaveBeenCalled()
 
       await act(async () => {

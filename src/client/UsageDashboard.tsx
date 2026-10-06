@@ -7,6 +7,7 @@ import type {
   UsageLedgerSnapshotRequest,
   UsageLedgerStatus,
 } from '../host/types.ts'
+import { UsageLedgerMark } from './UsageLedgerMark.tsx'
 import * as styles from './UsageDashboard.module.css'
 
 const css = styles.default
@@ -483,10 +484,15 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
   return (
     <section className={css.section} aria-busy={state.status === 'loading'}>
       <header className={css.header}>
-        <div>
-          <p className={css.eyebrow}>API / LEDGER</p>
-          <h2>{t('title')}</h2>
-          <p className={css.intro}>{t('intro')}</p>
+        <div className={css.identity}>
+          <span className={css.mark}>
+            <UsageLedgerMark size={22} />
+          </span>
+          <div>
+            <p className={css.eyebrow}>API / LEDGER</p>
+            <h2>{t('title')}</h2>
+            <p className={css.intro}>{t('intro')}</p>
+          </div>
         </div>
         <div>
           {exportCsv === undefined ? null : (

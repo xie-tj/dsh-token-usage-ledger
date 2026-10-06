@@ -31,7 +31,7 @@ export interface Config {
     readonly workerMaxActiveAttempts?: number;
     readonly workerBatchEvents?: number;
     readonly workerSliceMs?: number;
-    /** Pause historical scanning when the Mac is not confirmed to be on AC power. */
+    /** Pause historical scanning on battery power; the default runs everywhere. */
     readonly backfillPowerMode?: UsageLedgerAdaptiveConfig['powerMode'];
     readonly loadSampleIntervalMs?: number;
     readonly backfillMaxDelayMs?: number;
@@ -41,6 +41,8 @@ export interface Config {
     readonly backfillAimdIncrease?: number;
     readonly backfillAimdDecrease?: number;
     readonly backfillRecoverySamples?: number;
+    /** Consecutive over-limit event-loop samples required before history pauses. */
+    readonly backfillPauseSamples?: number;
     readonly backfillBusyEventLoopUtilization?: number;
     readonly backfillPauseEventLoopUtilization?: number;
     readonly backfillBusyEventLoopDelayMs?: number;

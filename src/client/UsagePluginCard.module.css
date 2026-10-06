@@ -1,5 +1,16 @@
 /* Usage plugin page: the dashboard renders inside the Plugins page body. */
 
+.summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.summary svg {
+  flex: none;
+  color: var(--dsw-alias-state-business-primary);
+}
+
 .body {
   padding: 4px 0 8px;
 }

@@ -26,6 +26,8 @@ export interface UsageLedgerAdaptiveConfig {
   /** Multiplicative decrease applied when the Host is busy. */
   readonly multiplicativeDecrease: number
   readonly recoverySamples: number
+  /** Consecutive over-limit event-loop samples required before historical replay pauses. */
+  readonly pauseSamples: number
   readonly busyEventLoopUtilization: number
   readonly pauseEventLoopUtilization: number
   readonly busyEventLoopDelayMs: number
@@ -46,6 +48,7 @@ export interface UsageLedgerPace {
 export class UsageLedgerGovernor {
   private workShare: number
   private healthySamples = 0
+  private pressureSamples = 0
 
   constructor(private readonly config: UsageLedgerAdaptiveConfig) {
     this.workShare = config.initialWorkShare
@@ -53,7 +56,7 @@ export class UsageLedgerGovernor {
 
   /** Update the worker pace from one Host workload sample. */
   observe(sample: UsageLedgerLoadSample): UsageLedgerPace {
-    if (this.config.powerMode === 'ac-only' && sample.powerSource !== 'ac') {
+    if (this.config.powerMode === 'ac-only' && sample.powerSource === 'battery') {
       return this.paused('battery')
     }
     if (sample.rssMiB >= this.config.pauseRssMiB
@@ -62,18 +65,17 @@ export class UsageLedgerGovernor {
         && sample.availableMemoryMiB <= this.config.pauseAvailableMemoryMiB)) {
       return this.paused('memory')
     }
-    if (sample.eventLoopUtilization >= this.config.pauseEventLoopUtilization
-      || sample.eventLoopDelayMs >= this.config.pauseEventLoopDelayMs) {
-      return this.paused('event-loop')
+    if (this.overPauseLimit(sample)) {
+      // One spike (a large tool result, a GC pause) must not stop history;
+      // sustained pressure over pauseSamples consecutive samples must.
+      this.pressureSamples += 1
+      if (this.pressureSamples >= this.config.pauseSamples) return this.paused('event-loop')
+      return this.backOff('event-loop')
     }
+    this.pressureSamples = 0
     if (sample.eventLoopUtilization >= this.config.busyEventLoopUtilization
       || sample.eventLoopDelayMs >= this.config.busyEventLoopDelayMs) {
-      this.healthySamples = 0
-      this.workShare = Math.max(
-        this.config.minWorkShare,
-        this.workShare * this.config.multiplicativeDecrease,
-      )
-      return this.current('run', 'event-loop')
+      return this.backOff('event-loop')
     }
     this.healthySamples += 1
     if (this.healthySamples >= this.config.recoverySamples) {
@@ -84,6 +86,20 @@ export class UsageLedgerGovernor {
       )
     }
     return this.current('run')
+  }
+
+  private overPauseLimit(sample: UsageLedgerLoadSample): boolean {
+    return sample.eventLoopUtilization >= this.config.pauseEventLoopUtilization
+      || sample.eventLoopDelayMs >= this.config.pauseEventLoopDelayMs
+  }
+
+  private backOff(reason: 'event-loop'): UsageLedgerPace {
+    this.healthySamples = 0
+    this.workShare = Math.max(
+      this.config.minWorkShare,
+      this.workShare * this.config.multiplicativeDecrease,
+    )
+    return this.current('run', reason)
   }
 
   private paused(reason: 'battery' | 'event-loop' | 'memory'): UsageLedgerPace {

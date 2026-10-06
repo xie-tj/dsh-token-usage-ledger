@@ -22,12 +22,12 @@ SQLite 是唯一账本存储：
 
 默认策略是完整历史，最近 30 天优先。最近窗口完成后，worker 自动继续较早的 retained sessions；进程重启后根据 SQLite cursor 断点恢复。
 
-主进程每隔一段时间观测自身的事件循环延迟、事件循环利用率、RSS 和电源状态：
+主进程每隔 1 秒观测自身的事件循环延迟、事件循环利用率、RSS 和电源状态：
 
-- Mac 未确认接通电源时暂停历史扫描；
-- dsh 响应变慢或 RSS 过高时立即暂停；
-- 中度繁忙时快速增加 worker slice 间隔；
-- 连续多个空闲采样后逐步缩短间隔；
+- 事件循环压力需要连续 backfillPauseSamples 个采样都超过上限才暂停；单次尖峰只降低处理占比；
+- 中度繁忙时降低处理占比，连续两个空闲采样后逐步提高；
+- RSS 或可用内存越界时仍然立即暂停；
+- 只有配置 backfillPowerMode: ac-only 时才在确认使用电池后暂停；默认 always，电源 probe 不可用（例如非 macOS）不再暂停；
 - live usage 事件始终优先于历史扫描。
 
 Usage 页面会显示后台统计进度；当它因资源或电源暂停时，已有统计仍可阅读和刷新。
@@ -59,21 +59,21 @@ bundle patch 默认提供 databasePath，通常不需要手动配置。需要调
 | backfillDays | 30 | 优先处理的最近天数 |
 | workerMaxHeapMiB | 512 | worker V8 堆上限 |
 | workerMaxActiveAttempts | 256 | 单个 session 可保留的未完成 request 上限 |
-| workerBatchEvents | 256 | 每次解析的最大事件数 |
-| workerSliceMs | 25 | 处理后主动让出的最长时间片 |
-| backfillPowerMode | ac-only | ac-only 仅接电回填；always 忽略电源状态 |
-| loadSampleIntervalMs | 2000 | 主进程负载采样间隔 |
-| backfillMaxDelayMs | 60000 | 暂停或强退让的最长间隔 |
-| backfillInitialWorkShare | 0.10 | worker 初始处理时间占比 |
-| backfillMinWorkShare | 0.05 | worker 的最低处理时间占比 |
-| backfillMaxWorkShare | 0.50 | worker 的最高处理时间占比 |
-| backfillAimdIncrease | 0.05 | 健康窗口后的线性增量 |
+| workerBatchEvents | 512 | 每次解析的最大事件数 |
+| workerSliceMs | 50 | 处理后主动让出的最长时间片 |
+| backfillPowerMode | always | always 忽略电源状态；ac-only 仅接电回填 |
+| loadSampleIntervalMs | 1000 | 主进程负载采样间隔 |
+| backfillMaxDelayMs | 15000 | 暂停或强退让的最长间隔 |
+| backfillInitialWorkShare | 0.25 | worker 初始处理时间占比 |
+| backfillMinWorkShare | 0.10 | worker 的最低处理时间占比 |
+| backfillMaxWorkShare | 0.80 | worker 的最高处理时间占比 |
+| backfillAimdIncrease | 0.10 | 健康窗口后的线性增量 |
 | backfillAimdDecrease | 0.50 | 繁忙采样时的乘性降幅 |
-| backfillPauseRssMiB | 1024 | 暂停回填的 dsh RSS 阈值 |
+| backfillPauseRssMiB | 2048 | 暂停回填的 dsh RSS 阈值 |
 | snapshotEventLimit | 256 | 单次 Snapshot 返回的明细行上限 |
 | snapshotScanBatchRows | 256 | Snapshot 每个 event-loop 回合读取的行数 |
 
-高级阈值也可配置：backfillRecoverySamples、backfillBusyEventLoopUtilization、backfillPauseEventLoopUtilization、backfillBusyEventLoopDelayMs、backfillPauseEventLoopDelayMs 和 backfillPauseAvailableMemoryMiB。AIMD 的 work share 会转换为每个 worker slice 之间的等待时间。
+高级阈值也可配置：backfillRecoverySamples、backfillPauseSamples、backfillBusyEventLoopUtilization、backfillPauseEventLoopUtilization、backfillBusyEventLoopDelayMs、backfillPauseEventLoopDelayMs 和 backfillPauseAvailableMemoryMiB。AIMD 的 work share 会转换为每个 worker slice 之间的等待时间。
 
 ## Snapshot API
 

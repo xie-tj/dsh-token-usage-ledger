@@ -2,6 +2,7 @@
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import { UsageDashboard } from './UsageDashboard.tsx'
+import { UsageLedgerMark } from './UsageLedgerMark.tsx'
 import type { UsageDashboardInjected } from './UsageDashboard.tsx'
 import * as styles from './UsagePluginCard.module.css'
 
@@ -20,7 +21,14 @@ type UsagePluginCardProps =
 
 /** Render the Usage one-liner or the full dashboard, as the Plugins page asks. */
 export function UsagePluginCard({ view, t, readSnapshot, readStatus, exportCsv }: UsagePluginCardProps) {
-  if (view === 'summary') return t('intro')
+  if (view === 'summary') {
+    return (
+      <span className={css.summary}>
+        <UsageLedgerMark size={14} />
+        {t('intro')}
+      </span>
+    )
+  }
   return (
     <div className={css.body}>
       <UsageDashboard t={t} readSnapshot={readSnapshot} readStatus={readStatus} exportCsv={exportCsv} />

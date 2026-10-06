@@ -66,25 +66,26 @@ declare module '@deepseek-ai/cordis' {
 
 const DEFAULT_DAYS = 30
 const MAX_DAYS = 366
-const DEFAULT_BATCH_EVENTS = 256
-const DEFAULT_SLICE_MS = 25
+const DEFAULT_BATCH_EVENTS = 512
+const DEFAULT_SLICE_MS = 50
 const DEFAULT_HEAP_MIB = 512
 const DEFAULT_MAX_ACTIVE_ATTEMPTS = 256
 const DEFAULT_EVENT_LIMIT = 256
 const DEFAULT_SCAN_BATCH_ROWS = 256
-const DEFAULT_SAMPLE_INTERVAL_MS = 2_000
-const DEFAULT_MAX_DELAY_MS = 60_000
-const DEFAULT_INITIAL_WORK_SHARE = 0.1
-const DEFAULT_MIN_WORK_SHARE = 0.05
-const DEFAULT_MAX_WORK_SHARE = 0.5
-const DEFAULT_AIMD_INCREASE = 0.05
+const DEFAULT_SAMPLE_INTERVAL_MS = 1_000
+const DEFAULT_MAX_DELAY_MS = 15_000
+const DEFAULT_INITIAL_WORK_SHARE = 0.25
+const DEFAULT_MIN_WORK_SHARE = 0.1
+const DEFAULT_MAX_WORK_SHARE = 0.8
+const DEFAULT_AIMD_INCREASE = 0.1
 const DEFAULT_AIMD_DECREASE = 0.5
-const DEFAULT_RECOVERY_SAMPLES = 5
-const DEFAULT_BUSY_ELU = 0.35
-const DEFAULT_PAUSE_ELU = 0.7
-const DEFAULT_BUSY_DELAY_MS = 40
-const DEFAULT_PAUSE_DELAY_MS = 150
-const DEFAULT_PAUSE_RSS_MIB = 1_024
+const DEFAULT_RECOVERY_SAMPLES = 2
+const DEFAULT_PAUSE_SAMPLES = 2
+const DEFAULT_BUSY_ELU = 0.5
+const DEFAULT_PAUSE_ELU = 0.9
+const DEFAULT_BUSY_DELAY_MS = 100
+const DEFAULT_PAUSE_DELAY_MS = 400
+const DEFAULT_PAUSE_RSS_MIB = 2_048
 const DEFAULT_PAUSE_AVAILABLE_MIB = 0
 const POWER_PROBE_INTERVAL_MS = 30_000
 
@@ -108,7 +109,7 @@ export interface Config {
   readonly workerMaxActiveAttempts?: number
   readonly workerBatchEvents?: number
   readonly workerSliceMs?: number
-  /** Pause historical scanning when the Mac is not confirmed to be on AC power. */
+  /** Pause historical scanning on battery power; the default runs everywhere. */
   readonly backfillPowerMode?: UsageLedgerAdaptiveConfig['powerMode']
   readonly loadSampleIntervalMs?: number
   readonly backfillMaxDelayMs?: number
@@ -118,6 +119,8 @@ export interface Config {
   readonly backfillAimdIncrease?: number
   readonly backfillAimdDecrease?: number
   readonly backfillRecoverySamples?: number
+  /** Consecutive over-limit event-loop samples required before history pauses. */
+  readonly backfillPauseSamples?: number
   readonly backfillBusyEventLoopUtilization?: number
   readonly backfillPauseEventLoopUtilization?: number
   readonly backfillBusyEventLoopDelayMs?: number
@@ -202,7 +205,7 @@ function resolveConfig(config: Config): ResolvedConfig {
   const snapshotEventLimit = config.snapshotEventLimit ?? DEFAULT_EVENT_LIMIT
   const snapshotScanBatchRows = config.snapshotScanBatchRows ?? DEFAULT_SCAN_BATCH_ROWS
   const adaptive = {
-    powerMode: config.backfillPowerMode ?? 'ac-only',
+    powerMode: config.backfillPowerMode ?? 'always',
     sampleIntervalMs: config.loadSampleIntervalMs ?? DEFAULT_SAMPLE_INTERVAL_MS,
     maxDelayMs: config.backfillMaxDelayMs ?? DEFAULT_MAX_DELAY_MS,
     sliceMs: workerSliceMs,
@@ -212,6 +215,7 @@ function resolveConfig(config: Config): ResolvedConfig {
     additiveIncrease: config.backfillAimdIncrease ?? DEFAULT_AIMD_INCREASE,
     multiplicativeDecrease: config.backfillAimdDecrease ?? DEFAULT_AIMD_DECREASE,
     recoverySamples: config.backfillRecoverySamples ?? DEFAULT_RECOVERY_SAMPLES,
+    pauseSamples: config.backfillPauseSamples ?? DEFAULT_PAUSE_SAMPLES,
     busyEventLoopUtilization: config.backfillBusyEventLoopUtilization ?? DEFAULT_BUSY_ELU,
     pauseEventLoopUtilization: config.backfillPauseEventLoopUtilization ?? DEFAULT_PAUSE_ELU,
     busyEventLoopDelayMs: config.backfillBusyEventLoopDelayMs ?? DEFAULT_BUSY_DELAY_MS,
@@ -233,6 +237,7 @@ function resolveConfig(config: Config): ResolvedConfig {
     ['loadSampleIntervalMs', adaptive.sampleIntervalMs, 100, 60_000],
     ['backfillMaxDelayMs', adaptive.maxDelayMs, 1, 60_000],
     ['backfillRecoverySamples', adaptive.recoverySamples, 1, 1_000],
+    ['backfillPauseSamples', adaptive.pauseSamples, 1, 1_000],
     ['backfillBusyEventLoopDelayMs', adaptive.busyEventLoopDelayMs, 1, 60_000],
     ['backfillPauseEventLoopDelayMs', adaptive.pauseEventLoopDelayMs, 1, 60_000],
     ['backfillPauseRssMiB', adaptive.pauseRssMiB, 64, 1_048_576],
@@ -567,7 +572,7 @@ export class UsageLedgerService extends TypertRemoteService {
     workerMaxActiveAttempts: z.number().step(1).min(1).max(4096).default(DEFAULT_MAX_ACTIVE_ATTEMPTS),
     workerBatchEvents: z.number().step(1).min(1).max(4096).default(DEFAULT_BATCH_EVENTS),
     workerSliceMs: z.number().step(1).min(1).max(1_000).default(DEFAULT_SLICE_MS),
-    backfillPowerMode: PowerModeSchema.default('ac-only'),
+    backfillPowerMode: PowerModeSchema.default('always'),
     loadSampleIntervalMs: z.number().step(1).min(100).max(60_000).default(DEFAULT_SAMPLE_INTERVAL_MS),
     backfillMaxDelayMs: z.number().step(1).min(1).max(60_000).default(DEFAULT_MAX_DELAY_MS),
     backfillInitialWorkShare: z.number().min(0.001).max(1).default(DEFAULT_INITIAL_WORK_SHARE),
@@ -576,6 +581,7 @@ export class UsageLedgerService extends TypertRemoteService {
     backfillAimdIncrease: z.number().min(0.001).max(1).default(DEFAULT_AIMD_INCREASE),
     backfillAimdDecrease: z.number().min(0.001).max(0.999).default(DEFAULT_AIMD_DECREASE),
     backfillRecoverySamples: z.number().step(1).min(1).max(1_000).default(DEFAULT_RECOVERY_SAMPLES),
+    backfillPauseSamples: z.number().step(1).min(1).max(1_000).default(DEFAULT_PAUSE_SAMPLES),
     backfillBusyEventLoopUtilization: z.number().min(0.001).max(1).default(DEFAULT_BUSY_ELU),
     backfillPauseEventLoopUtilization: z.number().min(0.001).max(1).default(DEFAULT_PAUSE_ELU),
     backfillBusyEventLoopDelayMs: z.number().step(1).min(1).max(60_000).default(DEFAULT_BUSY_DELAY_MS),

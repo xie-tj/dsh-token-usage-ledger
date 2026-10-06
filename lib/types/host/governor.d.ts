@@ -23,6 +23,8 @@ export interface UsageLedgerAdaptiveConfig {
     /** Multiplicative decrease applied when the Host is busy. */
     readonly multiplicativeDecrease: number;
     readonly recoverySamples: number;
+    /** Consecutive over-limit event-loop samples required before historical replay pauses. */
+    readonly pauseSamples: number;
     readonly busyEventLoopUtilization: number;
     readonly pauseEventLoopUtilization: number;
     readonly busyEventLoopDelayMs: number;
@@ -42,9 +44,12 @@ export declare class UsageLedgerGovernor {
     private readonly config;
     private workShare;
     private healthySamples;
+    private pressureSamples;
     constructor(config: UsageLedgerAdaptiveConfig);
     /** Update the worker pace from one Host workload sample. */
     observe(sample: UsageLedgerLoadSample): UsageLedgerPace;
+    private overPauseLimit;
+    private backOff;
     private paused;
     private current;
 }
