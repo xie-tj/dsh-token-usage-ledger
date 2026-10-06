@@ -23,6 +23,7 @@ import { installUsageStyles, UsageDashboard } from './UsageDashboard.tsx'
 import type { UsageDashboardInjected } from './UsageDashboard.tsx'
 import { UsageLedgerGlyph } from './UsageLedgerGlyph.tsx'
 import { installUsagePluginCardStyles, UsagePluginCard } from './UsagePluginCard.tsx'
+import { installUsageNavGlyph } from './usageNavGlyph.ts'
 import { en, zh, type UsageLocaleKey } from './locales.ts'
 
 /** Dictionary namespace owned by this package. */
@@ -114,6 +115,10 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         : undefined,
     })
     const t = ctx.locale.bind(NS)
+
+    // Shells without a registrant glyph seat keep their own section glyph; the
+    // adapter paints this plugin's mark on its row instead.
+    ctx.effect(() => installUsageNavGlyph(() => t('nav')), 'dsh-usage-ledger: nav glyph')
 
     ctx.effect(() => {
       const disposers: Array<() => void> = []

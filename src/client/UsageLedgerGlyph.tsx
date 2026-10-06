@@ -14,7 +14,7 @@ export interface UsageLedgerGlyphProps {
  */
 export function UsageLedgerGlyph({ size }: UsageLedgerGlyphProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false" data-usage-ledger-mark="nav">
       <rect x="2.15" y="9.35" width="3" height="4.5" rx="0.9" stroke="currentColor" strokeWidth="1.3" />
       <rect x="6.65" y="6.1" width="3" height="7.75" rx="0.9" stroke="currentColor" strokeWidth="1.3" />
       <rect x="11.15" y="2.85" width="3" height="11" rx="0.9" stroke="currentColor" strokeWidth="1.3" />

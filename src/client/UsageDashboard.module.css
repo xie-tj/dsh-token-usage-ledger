@@ -450,3 +450,20 @@
   .curvePoint,
   .tokenBar span { transition: none; }
 }
+
+/* The shipped shell draws every section glyph from a fixed section-id map, so
+   the plugin tags its own nav row and paints the ledger mark over the fallback.
+   A shell that renders the plugin's glyph itself leaves the row untagged. */
+:global([data-dsh-usage-glyph]) > svg {
+  display: none !important;
+}
+
+:global([data-dsh-usage-glyph])::before {
+  content: '';
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2.5' y='9' width='3' height='5' rx='1'/%3E%3Crect x='6.5' y='6' width='3' height='8' rx='1'/%3E%3Crect x='10.5' y='3' width='3' height='11' rx='1'/%3E%3C/svg%3E") center / 16px 16px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2.5' y='9' width='3' height='5' rx='1'/%3E%3Crect x='6.5' y='6' width='3' height='8' rx='1'/%3E%3Crect x='10.5' y='3' width='3' height='11' rx='1'/%3E%3C/svg%3E") center / 16px 16px no-repeat;
+}
