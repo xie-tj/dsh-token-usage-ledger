@@ -36,6 +36,7 @@ export declare const zh: {
     modelBreakdown: string;
     noData: string;
     loading: string;
+    loadingPeriod: string;
     loadFailed: string;
     showingLastGood: string;
     retry: string;
@@ -122,6 +123,7 @@ export declare const en: {
     modelBreakdown: string;
     noData: string;
     loading: string;
+    loadingPeriod: string;
     loadFailed: string;
     showingLastGood: string;
     retry: string;

@@ -84,10 +84,21 @@ export interface UsageDashboardInjected {
 /** Data and translation props consumed by the Usage dashboard in any Settings slot. */
 type UsageDashboardProps = PropsLocale<'settings.usage'> & UsageDashboardInjected
 
-type SnapshotState =
-  | { readonly status: 'loading'; readonly snapshot: UsageSnapshot | undefined; readonly error: undefined }
-  | { readonly status: 'ready'; readonly snapshot: UsageSnapshot; readonly error: undefined }
-  | { readonly status: 'error'; readonly snapshot: UsageSnapshot | undefined; readonly error: string }
+interface QueriedSnapshot {
+  readonly queryKey: string
+  readonly value: UsageSnapshot
+}
+
+type SnapshotState = { readonly requestKey: string } & (
+  | { readonly status: 'loading'; readonly snapshot: QueriedSnapshot | undefined; readonly error: undefined }
+  | { readonly status: 'ready'; readonly snapshot: QueriedSnapshot; readonly error: undefined }
+  | { readonly status: 'error'; readonly snapshot: QueriedSnapshot | undefined; readonly error: string }
+)
+
+/** Identity of the filters that own a completed response, independent of its arrival time. */
+function snapshotKey(period: Period, provider: string, model: string): string {
+  return JSON.stringify([period, provider, model])
+}
 
 function shiftDay(day: string, offset: number): string {
   const date = new Date(`${day}T00:00:00.000Z`)
@@ -362,11 +373,12 @@ function snapshotRequest(period: Period, provider: string, model: string): Usage
 /** Render the settings Usage dashboard with local filter and tooltip state. */
 export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: UsageDashboardProps): ReactNode {
   const tooltipId = useId()
-  const [state, setState] = useState<SnapshotState>({ status: 'loading', snapshot: undefined, error: undefined })
+  const [state, setState] = useState<SnapshotState>({ status: 'loading', snapshot: undefined, error: undefined, requestKey: snapshotKey('all', 'all', 'all') })
   const [request, setRequest] = useState(0)
   const [provider, setProvider] = useState('all')
   const [model, setModel] = useState('all')
   const [period, setPeriod] = useState<Period>('all')
+  const queryKey = snapshotKey(period, provider, model)
   const [showProvider, setShowProvider] = useState(false)
   const [target, setTarget] = useState<ChartTarget>(undefined)
   const [workerStatus, setWorkerStatus] = useState<UsageLedgerStatus | undefined>(undefined)
@@ -377,25 +389,27 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
 
   useEffect(() => {
     let current = true
-    setState(previous => ({ status: 'loading', snapshot: previous.snapshot, error: undefined }))
+    setState(previous => ({ status: 'loading', requestKey: queryKey, snapshot: previous.snapshot, error: undefined }))
+    setTarget(undefined)
     void readSnapshot(snapshotRequest(period, provider, model)).then(
       (snapshot) => {
         if (!current) return
         const projected = projectSnapshot(snapshot)
         if (provider === 'all' && model === 'all' && period === 'all') setCatalogModels(projected.models)
-        setState({ status: 'ready', snapshot: projected, error: undefined })
+        setState({ status: 'ready', requestKey: queryKey, snapshot: { queryKey, value: projected }, error: undefined })
       },
       (error: unknown) => {
         if (!current) return
         setState(previous => ({
           status: 'error',
+          requestKey: queryKey,
           snapshot: previous.snapshot,
           error: error instanceof Error ? error.message : '',
         }))
       },
     )
     return () => { current = false }
-  }, [model, period, provider, readSnapshot, readStatus, request])
+  }, [model, period, provider, queryKey, readSnapshot, request])
 
   useEffect(() => {
     if (readStatus === undefined) return
@@ -414,7 +428,9 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
     }
   }, [readStatus])
 
-  const snapshot = state.snapshot
+  // A retained response is usable for same-query refreshes, never a different range or filter.
+  const snapshot = state.snapshot?.queryKey === queryKey ? state.snapshot.value : undefined
+  const requestStatus = state.requestKey === queryKey ? state.status : 'loading'
   const models = useMemo(
     () => snapshot === undefined ? [] : [...snapshot.models].sort((left, right) => totalOf(right) - totalOf(left)),
     [snapshot],
@@ -448,6 +464,10 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
     failed: total.failed + row.failed,
     retried: total.retried + row.retried,
   }), { requests: 0, input: 0, output: 0, cached: 0, cacheHit: 0, unmetered: 0, failed: 0, retried: 0 }), [models])
+  const chartTotals = useMemo(() => buckets.reduce((total, bucket) => ({
+    requests: total.requests + bucket.requests,
+    tokens: total.tokens + bucket.input + bucket.output + bucket.cached,
+  }), { requests: 0, tokens: 0 }), [buckets])
   const curve = useMemo(() => curvePath(buckets), [buckets])
   const activeBucket = target === undefined ? undefined : buckets[target.index]
   const maxTokens = Math.max(1, ...buckets.map(bucket => bucket.input + bucket.output + bucket.cached))
@@ -485,11 +505,11 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
             {exporting ? t('exporting') : t('export')}
           </button>
         )}
-        <button type="button" className={css.refresh} disabled={state.status === 'loading'} onClick={refresh}>
+        <button type="button" className={css.refresh} disabled={requestStatus === 'loading'} onClick={refresh}>
           <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
             <path d="M13 5a5.3 5.3 0 1 0 .2 5.4M13 2v3.5H9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-          {state.status === 'loading' ? t('refreshing') : t('refresh')}
+          {requestStatus === 'loading' ? t('refreshing') : t('refresh')}
         </button>
       </div>
       <p className={css.intro}>{t('intro')}</p>
@@ -499,36 +519,7 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
     <UsageBackfillStatus status={workerStatus} stale={workerStatusReadFailed} t={t} />
   )
 
-  if (snapshot === undefined) {
-    return (
-      <div className={css.section} aria-busy={state.status === 'loading'}>
-        {heading}
-        {backfill}
-        {state.status === 'loading' ? <p className={css.status}>{t('loading')}</p> : null}
-        {state.status === 'error' ? (
-          <div className={css.failure} role="alert">
-            <p>{t('loadFailed')}</p>
-            <button type="button" onClick={refresh}>{t('retry')}</button>
-          </div>
-        ) : null}
-      </div>
-    )
-  }
-
-  return (
-    <section className={css.section} aria-busy={state.status === 'loading'}>
-      {heading}
-      {backfill}
-
-      {state.status === 'error' ? (
-        <p className={css.stale} role="status">{t('showingLastGood')}</p>
-      ) : null}
-
-      <p className={css.updated}>{interpolate(t('updated'), { time: usageTimeText(snapshot.updatedAt) })}</p>
-      {exportResult === undefined ? null : (
-        <p className={css.updated}>{interpolate(t('exportSaved'), { path: exportResult.path, rows: exactCountText(exportResult.rows) })}</p>
-      )}
-
+  const filters = (
       <div className={css.filters} role="group" aria-label={t('filterTitle')}>
         <label>
           <span>{t('provider')}</span>
@@ -553,6 +544,41 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
           </select>
         </label>
       </div>
+  )
+  const periodLabel = t(period === 'all' ? 'allTime' : period === '7d' ? 'sevenDays' : 'thirtyDays')
+
+  if (snapshot === undefined) {
+    return (
+      <div className={css.section} aria-busy={requestStatus === 'loading'}>
+        {heading}
+        {backfill}
+        {filters}
+        {requestStatus === 'loading' ? <p className={css.status} role="status">{interpolate(t('loadingPeriod'), { period: periodLabel })}</p> : null}
+        {requestStatus === 'error' ? (
+          <div className={css.failure} role="alert">
+            <p>{t('loadFailed')}</p>
+            <button type="button" onClick={refresh}>{t('retry')}</button>
+          </div>
+        ) : null}
+      </div>
+    )
+  }
+
+  return (
+    <section className={css.section} aria-busy={requestStatus === 'loading'}>
+      {heading}
+      {backfill}
+
+      {requestStatus === 'error' ? (
+        <p className={css.stale} role="status">{t('showingLastGood')}</p>
+      ) : null}
+
+      <p className={css.updated}>{interpolate(t('updated'), { time: usageTimeText(snapshot.updatedAt) })}</p>
+      {exportResult === undefined ? null : (
+        <p className={css.updated}>{interpolate(t('exportSaved'), { path: exportResult.path, rows: exactCountText(exportResult.rows) })}</p>
+      )}
+
+      {filters}
       {period === 'all' ? <p className={css.historyNote}>{t('allHistoryCharts')}</p> : null}
 
       {totals.requests === 0 ? <p className={css.empty}>{t('noData')}</p> : (
@@ -576,7 +602,7 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
 
           <div className={css.charts}>
             <article className={css.chartCard}>
-              <div className={css.chartHeading}><h3>{t('requestCurve')}</h3><span>{exactCountText(totals.requests)}</span></div>
+              <div className={css.chartHeading}><h3>{t('requestCurve')}</h3><span>{exactCountText(chartTotals.requests)}</span></div>
               <div className={css.curveChart}>
                 <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
                   <path className={css.gridLine} d="M 0 36 H 100" />
@@ -612,7 +638,7 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
             </article>
 
             <article className={css.chartCard}>
-              <div className={css.chartHeading}><h3>{t('tokenFlow')}</h3><span>{tokenText(totals.input + totals.output + totals.cached)}</span></div>
+              <div className={css.chartHeading}><h3>{t('tokenFlow')}</h3><span>{tokenText(chartTotals.tokens)}</span></div>
               <div className={css.barChart}>
                 {buckets.map((bucket, index) => {
                   const next = { kind: 'tokens' as const, index }
