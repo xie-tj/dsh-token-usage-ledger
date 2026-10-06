@@ -30,7 +30,7 @@ SQLite 是唯一账本存储：
 - 只有配置 backfillPowerMode: ac-only 时才在确认使用电池后暂停；默认 always，电源 probe 不可用（例如非 macOS）不再暂停；
 - live usage 事件始终优先于历史扫描。
 
-Usage 页面会显示后台统计进度；当它因资源或电源暂停时，已有统计仍可阅读和刷新。
+Usage 页面以独立状态面板显示统计中、暂停原因、异常或历史完成状态，并展示已处理／总会话数、已处理事件数、待处理会话数和扫描进度。百分比只按已完成会话计算，不代表 token 处理量或预计剩余时间；会话总数尚未发现时显示扫描中的不定进度，不标记为 100%。进度每两秒自动更新；状态读取失败时保留上次的计数并提示数据暂未刷新。因资源或电源暂停时，已有统计仍可阅读和刷新。
 
 JSONL persistence 提供 provider-owned 流式 session header lister，因此主进程不会先创建全量 session 列表。自定义 persistence 若仅支持 reader、未提供 lister，会采用一次兼容性 listing；完全没有 isolated reader 时仅启用 live ledger，并在状态中说明历史回填暂停。
 
@@ -43,7 +43,7 @@ JSONL persistence 提供 provider-owned 流式 session header lister，因此主
 
 本版本面向 DSH 0.2.0-rc.2 及以上的 0.2.x（peerDependencies 为 `^0.2.0-rc.2`）。安装包已包含 Host、Client、Typert 和 worker 的编译产物，不依赖安装时构建。
 
-打开 Settings → Usage 查看最近 7 天或 30 天的数据。筛选提供方或模型时，页面向 Host 请求该筛选的数据库聚合，而不是把全部 request 明细传入浏览器。
+打开 Settings → Usage 查看最近 7 天或 30 天的数据。页头按钮等高并保持成组，说明文字独占一行；提供方、模型和时间范围采用等宽筛选布局，按设置面板的内容宽度自适应而不是按整个 app 窗口宽度。筛选提供方或模型时，页面向 Host 请求该筛选的数据库聚合，而不是把全部 request 明细传入浏览器。
 
 同一个仪表盘也挂在插件页里本包自己的行上（plugins.row.config，键为 dsh-plugin-usage-ledger#usage-ledger-plugin）。plugins.item 属于官方设置页，本包不占用它，因此不会出现在官方分组里。
 

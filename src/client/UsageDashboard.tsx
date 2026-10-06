@@ -8,6 +8,8 @@ import type {
   UsageLedgerStatus,
 } from '../host/types.ts'
 import { UsageLedgerMark } from './UsageLedgerMark.tsx'
+import { UsageBackfillStatus } from './UsageBackfillStatus.tsx'
+import { usageTimeText } from './usageTime.ts'
 import * as styles from './UsageDashboard.module.css'
 
 const css = styles.default
@@ -368,6 +370,7 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
   const [showProvider, setShowProvider] = useState(false)
   const [target, setTarget] = useState<ChartTarget>(undefined)
   const [workerStatus, setWorkerStatus] = useState<UsageLedgerStatus | undefined>(undefined)
+  const [workerStatusReadFailed, setWorkerStatusReadFailed] = useState(false)
   const [catalogModels, setCatalogModels] = useState<readonly ModelRow[]>([])
   const [exporting, setExporting] = useState(false)
   const [exportResult, setExportResult] = useState<UsageLedgerExportResult | undefined>(undefined)
@@ -399,8 +402,8 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
     let current = true
     const update = (): void => {
       void readStatus().then(
-        status => { if (current) setWorkerStatus(status) },
-        () => { if (current) setWorkerStatus(undefined) },
+        status => { if (current) { setWorkerStatus(status); setWorkerStatusReadFailed(false) } },
+        () => { if (current) setWorkerStatusReadFailed(true) },
       )
     }
     update()
@@ -449,9 +452,6 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
   const activeBucket = target === undefined ? undefined : buckets[target.index]
   const maxTokens = Math.max(1, ...buckets.map(bucket => bucket.input + bucket.output + bucket.cached))
   const tokenText = (value: number): string => fullNumberText(value)
-  const pauseReason = workerStatus?.state === 'paused' && workerStatus.pace?.mode === 'pause'
-    ? workerStatus.pace.reason
-    : undefined
 
   const refresh = (): void => { setRequest(current => current + 1) }
   const exportLedger = (): void => {
@@ -467,9 +467,43 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
     setTarget(current => current?.kind === next.kind && current.index === next.index ? undefined : next)
   }
 
+  const heading = (
+    <header className={css.header}>
+      <div className={css.identity}>
+        <span className={css.mark}><UsageLedgerMark size={22} /></span>
+        <div>
+          <p className={css.eyebrow}>API / LEDGER</p>
+          <h2>{t('title')}</h2>
+        </div>
+      </div>
+      <div className={css.headerActions} role="group" aria-label={t('ledgerActions')}>
+        {exportCsv === undefined ? null : (
+          <button type="button" className={css.refresh} disabled={exporting || snapshot === undefined} onClick={exportLedger}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+              <path d="M8 2v8m-3-3 3 3 3-3M3 10v3h10v-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            {exporting ? t('exporting') : t('export')}
+          </button>
+        )}
+        <button type="button" className={css.refresh} disabled={state.status === 'loading'} onClick={refresh}>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+            <path d="M13 5a5.3 5.3 0 1 0 .2 5.4M13 2v3.5H9.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          {state.status === 'loading' ? t('refreshing') : t('refresh')}
+        </button>
+      </div>
+      <p className={css.intro}>{t('intro')}</p>
+    </header>
+  )
+  const backfill = readStatus === undefined ? null : (
+    <UsageBackfillStatus status={workerStatus} stale={workerStatusReadFailed} t={t} />
+  )
+
   if (snapshot === undefined) {
     return (
       <div className={css.section} aria-busy={state.status === 'loading'}>
+        {heading}
+        {backfill}
         {state.status === 'loading' ? <p className={css.status}>{t('loading')}</p> : null}
         {state.status === 'error' ? (
           <div className={css.failure} role="alert">
@@ -483,53 +517,19 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
 
   return (
     <section className={css.section} aria-busy={state.status === 'loading'}>
-      <header className={css.header}>
-        <div className={css.identity}>
-          <span className={css.mark}>
-            <UsageLedgerMark size={22} />
-          </span>
-          <div>
-            <p className={css.eyebrow}>API / LEDGER</p>
-            <h2>{t('title')}</h2>
-            <p className={css.intro}>{t('intro')}</p>
-          </div>
-        </div>
-        <div>
-          {exportCsv === undefined ? null : (
-            <button type="button" className={css.refresh} disabled={exporting} onClick={exportLedger}>
-              {exporting ? t('exporting') : t('export')}
-            </button>
-          )}
-          <button type="button" className={css.refresh} disabled={state.status === 'loading'} onClick={refresh}>
-            {state.status === 'loading' ? t('refreshing') : t('refresh')}
-          </button>
-        </div>
-      </header>
+      {heading}
+      {backfill}
 
       {state.status === 'error' ? (
         <p className={css.stale} role="status">{t('showingLastGood')}</p>
       ) : null}
-      {workerStatus?.state === 'running' ? (
-        <p className={css.stale} role="status">
-          {interpolate(t('backfillRunning'), {
-            processed: exactCountText(workerStatus.processedSessions),
-            total: exactCountText(workerStatus.totalSessions),
-          })}
-        </p>
-      ) : null}
-      {pauseReason !== undefined ? (
-        <p className={css.stale} role="status">
-          {pauseReason === 'battery' ? t('backfillPausedBattery')
-            : pauseReason === 'memory' ? t('backfillPausedMemory')
-              : t('backfillPausedEventLoop')}
-        </p>
-      ) : null}
-      <p className={css.updated}>{interpolate(t('updated'), { time: snapshot.updatedAt })}</p>
+
+      <p className={css.updated}>{interpolate(t('updated'), { time: usageTimeText(snapshot.updatedAt) })}</p>
       {exportResult === undefined ? null : (
         <p className={css.updated}>{interpolate(t('exportSaved'), { path: exportResult.path, rows: exactCountText(exportResult.rows) })}</p>
       )}
 
-      <div className={css.filters}>
+      <div className={css.filters} role="group" aria-label={t('filterTitle')}>
         <label>
           <span>{t('provider')}</span>
           <select value={provider} onChange={(event) => { setProvider(event.currentTarget.value); setModel('all') }}>
@@ -553,7 +553,7 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
           </select>
         </label>
       </div>
-      {period === 'all' ? <p className={css.stale}>{t('allHistoryCharts')}</p> : null}
+      {period === 'all' ? <p className={css.historyNote}>{t('allHistoryCharts')}</p> : null}
 
       {totals.requests === 0 ? <p className={css.empty}>{t('noData')}</p> : (
         <>
