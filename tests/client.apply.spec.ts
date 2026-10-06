@@ -154,7 +154,7 @@ describe('Usage client apply', () => {
     cardCssDisposer.mockClear()
   })
 
-  it('registers the Settings section and Plugins page once their slots are declared', async () => {
+  it('registers the Settings section and its own bundle row once their slots are declared', async () => {
     expect(inject).toEqual(['slots', 'locale', 'remote'])
     const b = bench()
     const applyDisposer = await apply(b.ctx as never)
@@ -163,8 +163,8 @@ describe('Usage client apply', () => {
     expect(b.entries).toHaveLength(0)
 
     b.declare('settings.section')
-    b.declare('plugins.item')
-    expect(entryNames(b.entries)).toEqual(['plugins.item', 'settings.section'])
+    b.declare('plugins.row.config')
+    expect(entryNames(b.entries)).toEqual(['plugins.row.config', 'settings.section'])
     expect(b.entries).toEqual(expect.arrayContaining([
       expect.objectContaining({
         component: UsageDashboard,
@@ -172,9 +172,14 @@ describe('Usage client apply', () => {
       }),
       expect.objectContaining({
         component: UsagePluginCard,
-        options: expect.objectContaining({ id: 'usage-ledger', order: 30, locale: 'settings.usage' }),
+        options: expect.objectContaining({
+          key: 'dsh-plugin-usage-ledger#usage-ledger-plugin',
+          locale: 'settings.usage',
+        }),
       }),
     ]))
+    // The Official group belongs to the official settings pages.
+    expect(b.entries.some(entry => entry.options.name === 'plugins.item')).toBe(false)
     expect(b.locale.bind('settings.usage')('nav')).toBe('用量')
 
     await b.dispose(applyDisposer)
@@ -191,13 +196,13 @@ describe('Usage client apply', () => {
 
     const collapseSection = b.declare('settings.section')
     expect(entryNames(b.entries)).toEqual(['settings.section'])
-    const collapsePluginItem = b.declare('plugins.item')
-    expect(entryNames(b.entries)).toEqual(['plugins.item', 'settings.section'])
+    const collapsePluginItem = b.declare('plugins.row.config')
+    expect(entryNames(b.entries)).toEqual(['plugins.row.config', 'settings.section'])
 
     collapseSection()
-    expect(entryNames(b.entries)).toEqual(['plugins.item'])
+    expect(entryNames(b.entries)).toEqual(['plugins.row.config'])
     b.declare('settings.section')
-    expect(entryNames(b.entries)).toEqual(['plugins.item', 'settings.section'])
+    expect(entryNames(b.entries)).toEqual(['plugins.row.config', 'settings.section'])
     collapsePluginItem()
     await b.dispose(applyDisposer)
     expect(b.entries).toHaveLength(0)
@@ -206,10 +211,10 @@ describe('Usage client apply', () => {
   it('rolls back a partial display registration', async () => {
     const b = bench()
     b.declare('settings.section')
-    b.declare('plugins.item')
-    b.failRegistration('plugins.item')
+    b.declare('plugins.row.config')
+    b.failRegistration('plugins.row.config')
 
-    await expect(apply(b.ctx as never)).rejects.toThrow('failed plugins.item')
+    await expect(apply(b.ctx as never)).rejects.toThrow('failed plugins.row.config')
     expect(b.entries).toHaveLength(0)
   })
 

@@ -45,6 +45,8 @@ JSONL persistence 提供 provider-owned 流式 session header lister，因此主
 
 打开 Settings → Usage 查看最近 7 天或 30 天的数据。筛选提供方或模型时，页面向 Host 请求该筛选的数据库聚合，而不是把全部 request 明细传入浏览器。
 
+同一个仪表盘也挂在插件页里本包自己的行上（plugins.row.config，键为 dsh-plugin-usage-ledger#usage-ledger-plugin）。plugins.item 属于官方设置页，本包不占用它，因此不会出现在官方分组里。
+
 页面默认显示全部历史的汇总。Export CSV 会把当前筛选的完整 call 记录按 SQLite 页流式写入 owner-only 文件，完成后显示保存路径；导出不会把整份 CSV 或整本账本装入浏览器内存。
 
 ## 配置

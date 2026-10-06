@@ -1,9 +1,9 @@
-/** Browser-side Usage Settings page and Plugins configuration card. */
+/** Browser-side Usage Settings page and this bundle's Plugins page row. */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 // Type-only: pulls the settings shell's SlotMap merge (the 'settings.section' entry).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-// Type-only: pulls the Plugins page's SlotMap merge (the 'plugins.item' entry).
+// Type-only: pulls the Plugins page's SlotMap merge (the 'plugins.row.config' entry).
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 // Type-only: pulls the renderer's Context merge (ctx.slots).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -26,6 +26,13 @@ import { en, zh, type UsageLocaleKey } from './locales.ts'
 
 /** Dictionary namespace owned by this package. */
 const NS = 'settings.usage'
+
+/**
+ * Key of this package's own row in the Plugins page: `<package name>#<row id>`,
+ * with the row id the bundle patch declares. The Official group belongs to the
+ * official settings pages, so this bundle's page renders on its own row instead.
+ */
+const PLUGIN_ROW_KEY = 'dsh-plugin-usage-ledger#usage-ledger-plugin'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -110,11 +117,9 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
           locale: NS,
           inject: injected,
         }, UsageDashboard)))
-        disposers.push(ctx.slots.inject('plugins.item', () => ctx.slots.register({
-          name: 'plugins.item',
-          id: 'usage-ledger',
-          order: 30,
-          label: () => t('title'),
+        disposers.push(ctx.slots.inject('plugins.row.config', () => ctx.slots.register({
+          name: 'plugins.row.config',
+          key: PLUGIN_ROW_KEY,
           locale: NS,
           inject: injected,
         }, UsagePluginCard)))

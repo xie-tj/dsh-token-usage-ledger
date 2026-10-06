@@ -1,4 +1,4 @@
-/** Usage dashboard page contributed to the Plugins settings page. */
+/** Usage dashboard page on this bundle's own row in the Plugins page. */
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import { UsageDashboard } from './UsageDashboard.tsx'
@@ -13,9 +13,9 @@ export function installUsagePluginCardStyles(): () => void {
   return typeof styles.install === 'function' ? styles.install() : () => {}
 }
 
-/** Props composed by the Plugins page's item slot. */
+/** Props composed by the Plugins page's row-configuration slot. */
 type UsagePluginCardProps =
-  PropsRuntime<'plugins.item'>
+  PropsRuntime<'plugins.row.config'>
   & PropsLocale<'settings.usage'>
   & InjectFace<UsageDashboardInjected>
 
