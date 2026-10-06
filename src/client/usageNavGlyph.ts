@@ -41,6 +41,7 @@ export function installUsageNavGlyph(readLabel: () => string): () => void {
   const relevant = (node: Node): boolean => node instanceof Element
     && (node.matches(ROW_SCOPE)
       || node.querySelector(ROW_SCOPE) !== null
+      || node.closest(ROW_SCOPE) !== null
       || node.closest('[' + USAGE_NAV_ROW_ATTRIBUTE + ']') !== null)
 
   // Attribute writes are not observed, so reparsing our own tag cannot loop.

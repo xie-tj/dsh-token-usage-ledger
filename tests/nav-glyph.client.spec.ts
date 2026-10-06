@@ -46,6 +46,22 @@ describe('Usage nav glyph adapter', () => {
     dispose()
   })
 
+  it('tags a row the shell replaces inside an open panel', async () => {
+    const panel = dialog(row('用量'))
+    const first = panel.querySelector('button') as HTMLButtonElement
+    const dispose = installUsageNavGlyph(() => '用量')
+    expect(first.hasAttribute(USAGE_NAV_ROW_ATTRIBUTE)).toBe(true)
+
+    const holder = document.createElement('div')
+    holder.innerHTML = row('用量')
+    const replacement = holder.firstElementChild as HTMLButtonElement
+    first.replaceWith(replacement)
+
+    await ticks()
+    expect(replacement.hasAttribute(USAGE_NAV_ROW_ATTRIBUTE)).toBe(true)
+    dispose()
+  })
+
   it('leaves the row alone when the shell renders the plugin glyph itself', () => {
     const panel = dialog(row('通用设置'), row('用量', OWN_GLYPH))
     const usageRow = panel.querySelectorAll('button')[1]
