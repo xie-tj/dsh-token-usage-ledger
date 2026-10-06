@@ -9,6 +9,7 @@
     "src/invariant.ts",
     "src/types.ts",
     "src/host",
-    "src/backfill-worker.ts"
+    "src/backfill-worker.ts",
+    "src/jsonl-reader.ts"
   ]
 }

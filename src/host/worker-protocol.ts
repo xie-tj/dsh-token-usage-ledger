@@ -4,7 +4,7 @@ import type { UsageSessionEvent } from './event-types.ts'
 
 export const USAGE_LEDGER_WORKER_PROTOCOL = 1
 
-/** JSON-safe provider-owned reader description (kept structural for alpha.5 peers). */
+/** JSON-safe isolated reader description, supplied by a provider or the released JSONL adapter. */
 export interface WorkerReaderSpec {
   readonly protocolVersion: number
   readonly workerModule: string
@@ -13,14 +13,14 @@ export interface WorkerReaderSpec {
   readonly supportsSessionListing?: boolean
 }
 
-/** Runtime contract implemented by a provider-owned reader module. */
+/** Runtime contract implemented by an isolated historical reader module. */
 export interface WorkerReaderModule {
   readSessionBatches(
     options: Readonly<Record<string, boolean | number | string>> | undefined,
     request: { readonly session: { readonly id: string; readonly cwd?: string }; readonly fromSeq: number; readonly batchEvents: number },
     signal?: AbortSignal,
   ): AsyncIterable<WorkerReaderBatch>
-  /** Stream stored session headers without materializing the provider's catalog. */
+  /** Iterate stored headers inside the worker; a public metadata list may be materialized there. */
   listSessionHeaders?: (
     options: Readonly<Record<string, boolean | number | string>> | undefined,
     request: { readonly createdAtAfter?: number; readonly createdAtBefore?: number },
@@ -28,14 +28,14 @@ export interface WorkerReaderModule {
   ) => AsyncIterable<WorkerListedSession>
 }
 
-/** Bounded event batch returned from a provider-owned reader. */
+/** Bounded reducer batch returned from an isolated historical reader. */
 export interface WorkerReaderBatch {
   readonly meta: { readonly id: string }
   readonly inheritedEventCount: number
   readonly events: readonly UsageSessionEvent[]
 }
 
-/** One stored lifecycle discovered by a provider-owned background lister. */
+/** One stored lifecycle discovered by an isolated background lister. */
 export interface WorkerListedSession {
   readonly id: string
   readonly createdAt: number

@@ -44,6 +44,7 @@ import type {
   WorkerSession,
 } from './worker-protocol.ts'
 import { UsageWorkerSupervisor } from './supervisor.ts'
+import { releasedJsonlReaderSpec } from './jsonl-reader-spec.ts'
 
 export type * from './types.ts'
 export {
@@ -654,11 +655,15 @@ export class UsageLedgerService extends TypertRemoteService {
   /** Start independently of task initialization and keep fallback listing out of capable providers. */
   private async startWorker(persistence: SessionPersistence): Promise<void> {
     let readerSpec: WorkerReaderSpec | undefined
+    let readerFailure: string | undefined
     try {
       const runtime = persistence as unknown as PersistenceReaderRuntime
-      readerSpec = validateReaderSpec(typeof runtime.backgroundReaderSpec === 'function' ? runtime.backgroundReaderSpec() : undefined)
+      readerSpec = typeof runtime.backgroundReaderSpec === 'function'
+        ? validateReaderSpec(runtime.backgroundReaderSpec())
+        : await releasedJsonlReaderSpec(persistence)
     } catch (error: unknown) {
-      this.recordFailure('provider-owned reader unavailable: ' + (error instanceof Error ? error.message : String(error)))
+      readerFailure = 'background reader initialization failed: ' + (error instanceof Error ? error.message : String(error))
+      this.recordFailure(readerFailure)
     }
     let fallback: readonly ListedSession[] = []
     if (readerSpec !== undefined && readerSpec.supportsSessionListing !== true) {
@@ -692,10 +697,10 @@ export class UsageLedgerService extends TypertRemoteService {
       })
       this.status = {
         ...this.status,
-        state: readerSpec === undefined ? 'paused' : 'running',
+        state: readerFailure !== undefined ? 'failed' : readerSpec === undefined ? 'paused' : 'running',
         totalSessions: fallback.length,
         updatedAt: new Date().toISOString(),
-        ...(readerSpec === undefined ? { lastError: 'session persistence does not expose backgroundReaderSpec; historical backfill is paused' } : {}),
+        ...(readerSpec === undefined ? { lastError: readerFailure ?? 'session persistence does not expose backgroundReaderSpec or supported JSONL read handles; historical backfill is paused' } : {}),
       }
       if (readerSpec === undefined) this.ctx.logger.warn('usage ledger: persistence has no provider-owned background reader; live ledger remains enabled')
       this.worker.start(makeInitFrame(), makeInitFrame)

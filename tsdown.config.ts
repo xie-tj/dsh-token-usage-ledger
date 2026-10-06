@@ -5,7 +5,7 @@ const PACKAGE_NAME = 'dsh-plugin-usage-ledger'
 
 const hostConfig: UserConfig = {
   name: PACKAGE_NAME,
-  entry: ['lib/types/index.js', 'lib/types/backfill-worker.js'],
+  entry: ['lib/types/index.js', 'lib/types/backfill-worker.js', 'lib/types/jsonl-reader.js'],
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',

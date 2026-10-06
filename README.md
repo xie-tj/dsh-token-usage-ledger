@@ -32,7 +32,11 @@ SQLite 是唯一账本存储：
 
 Usage 页面以独立状态面板显示统计中、暂停原因、异常或历史完成状态，并展示已处理／总会话数、已处理事件数、待处理会话数和扫描进度。百分比只按已完成会话计算，不代表 token 处理量或预计剩余时间；会话总数尚未发现时显示扫描中的不定进度，不标记为 100%。进度每两秒自动更新；状态读取失败时保留上次的计数并提示数据暂未刷新。因资源或电源暂停时，已有统计仍可阅读和刷新。
 
-JSONL persistence 提供 provider-owned 流式 session header lister，因此主进程不会先创建全量 session 列表。自定义 persistence 若仅支持 reader、未提供 lister，会采用一次兼容性 listing；完全没有 isolated reader 时仅启用 live ledger，并在状态中说明历史回填暂停。
+读取历史有两条路径：提供方若暴露 backgroundReaderSpec，继续使用其独立读取模块；发布版 DSH 0.2.0-rc.2 的 JSONL 提供方不暴露该接口，插件改由自身的 JSONL adapter 在低优先级 worker 内挂载同一提供方、同一 root 与 compression，只调用 list、open(id, read) 与 handle.read。解压、格式迁移的只读投影、校验和 inheritedEventCount 均由官方公开接口处理，插件不直接解析物理日志，不打开 write handle，也不发布迁移或修改源日志。目录枚举也在 worker 内完成，主进程不先创建全量会话列表。
+
+公开 read handle 接口可能在打开时解码单个完整会话；事件批次限制的是 reducer 每次处理量，不是提供方解码峰值。adapter 每次扫描会话创建新提供方实例并在完成或取消时释放，避免缓存保留之前会话的正文。特别大的单会话仍受 workerMaxHeapMiB 限制。新建但尚未物化的日志等待后续 rescan，已有 SQLite cursor 保证重启后不重复记账。
+
+自定义 persistence 若提供 reader、未提供 lister，仍使用一次 Host 兼容性 listing；没有可用独立 reader 且不是受支持 JSONL 实例时仅启用 live ledger，并明确报告历史回填不可用。提供方启动异常会保留实际错误，不再替换为缺少接口的泛化消息。
 
 ## 安装与启动
 

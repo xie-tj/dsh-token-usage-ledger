@@ -11,7 +11,7 @@ import type {} from '../lib/types/host/index.js'
 // @ts-expect-error built bundle runtime entry
 import UsageLedgerService from '../lib/index.js'
 
-async function setup(config: ConstructorParameters<typeof UsageLedgerService>[1] = {}) {
+async function setup(config: ConstructorParameters<typeof UsageLedgerService>[1] = {}, reader?: () => unknown) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-usage-ledger-host-'))
   const id = SessionId('usage-ledger-live-' + Math.random())
   const session = Session.create(id, undefined, {
@@ -26,7 +26,7 @@ async function setup(config: ConstructorParameters<typeof UsageLedgerService>[1]
   const persistence: {
     list: () => Promise<unknown>
     backgroundReaderSpec?: () => unknown
-  } = { list: vi.fn(async () => []) }
+  } = { list: vi.fn(async () => []), ...(reader === undefined ? {} : { backgroundReaderSpec: reader }) }
   ctx.provide('sessionPersistence', persistence as never)
   ctx.provide('settings', { register: vi.fn(() => () => {}) } as never)
   const fiber = ctx.plugin(UsageLedgerService, {
@@ -133,6 +133,16 @@ describe('UsageLedgerService lifecycle', () => {
     } finally {
       await test.dispose()
     }
+  })
+
+  it('keeps the actual reader initialization error instead of replacing it with an unsupported-provider message', async () => {
+    const test=await setup({backfillMode:'process'},()=>{throw new Error('fixture reader setup failed')})
+    try {
+      await test.fiber.await()
+      await waitFor(()=>test.ctx.usageLedger.statusSnapshot().lastError !== undefined)
+      expect(test.ctx.usageLedger.statusSnapshot().lastError).toContain('fixture reader setup failed')
+      expect(test.ctx.usageLedger.statusSnapshot().lastError).not.toContain('does not expose backgroundReaderSpec')
+    } finally {await test.dispose()}
   })
 
   it('keeps live mode while pausing unsupported historical persistence', async () => {

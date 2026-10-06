@@ -1,5 +1,7 @@
 allowBuilds:
   esbuild: true
+  # Koffi supplies optional prebuilt binaries; do not run its source-build installer.
+  koffi: false
 minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-agent@0.2.0-rc.2'
   - '@deepseek-ai/dsh-api-remotes@0.2.0-rc.2'
