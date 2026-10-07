@@ -66,6 +66,13 @@ describe('UsageLedgerService lifecycle', () => {
     }
   })
 
+  it('does not apply the unreliable free-page floor by default on macOS', () => {
+    const config=UsageLedgerService.Config({databasePath:':memory:'})
+    expect(config.backfillPauseRssMiB).toBe(2048)
+    expect(config.backfillPauseAvailableMemoryMiB).toBe(0)
+    expect(UsageLedgerService.Config({databasePath:':memory:',backfillPauseAvailableMemoryMiB:256}).backfillPauseAvailableMemoryMiB).toBe(256)
+  })
+
   it('does not register Usage work on the awaited session/flush barrier', async () => {
     let releaseListing!: () => void
     const listing = new Promise<void>(resolve => { releaseListing = resolve })

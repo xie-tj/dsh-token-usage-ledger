@@ -6,19 +6,19 @@ import { usageTimeText } from './usageTime.ts'
 import * as styles from './UsageDashboard.module.css'
 
 const css = styles.default
-type Phase = 'running' | 'paused' | 'failed' | 'complete' | 'waiting' | 'loading' | 'unavailable'
+type Phase = 'running' | 'resuming' | 'paused' | 'failed' | 'complete' | 'waiting' | 'loading' | 'unavailable'
 type Props = PropsLocale<'settings.usage'> & {
   readonly status: UsageLedgerStatus | undefined
   /** A failed poll retains the last successful progress counters. */
   readonly stale: boolean
 }
 const titles: Record<Phase, UsageLocaleKey> = {
-  running: 'backfillStateRunning', paused: 'backfillStatePaused', failed: 'backfillStateFailed',
+  running: 'backfillStateRunning', resuming: 'backfillStateResuming', paused: 'backfillStatePaused', failed: 'backfillStateFailed',
   complete: 'backfillStateComplete', waiting: 'backfillStateWaiting',
   loading: 'backfillStateLoading', unavailable: 'backfillStateUnavailable',
 }
 const descriptions: Record<Phase, UsageLocaleKey> = {
-  running: 'backfillRunningHint', paused: 'backfillPausedHint', failed: 'backfillFailedHint',
+  running: 'backfillRunningHint', resuming: 'backfillResumingHint', paused: 'backfillPausedHint', failed: 'backfillFailedHint',
   complete: 'backfillCompleteHint', waiting: 'backfillWaitingHint',
   loading: 'backfillLoadingHint', unavailable: 'backfillUnavailableHint',
 }
@@ -36,9 +36,11 @@ export function UsageBackfillStatus({ status, stale, t }: Props) {
   const knownTotal = status !== undefined && status.totalSessions > 0
   const phase: Phase = status === undefined
     ? stale ? 'unavailable' : 'loading'
-    : status.state === 'idle'
-      ? knownTotal && status.processedSessions >= status.totalSessions ? 'complete' : 'waiting'
-      : status.state
+    : status.lastError === undefined && knownTotal && status.processedSessions >= status.totalSessions && (status.state === 'idle' || status.state === 'paused')
+      ? 'complete'
+      : status.state === 'paused' && status.pace?.mode === 'run' && status.lastError === undefined
+        ? 'resuming'
+        : status.state === 'idle' ? 'waiting' : status.state
   const percent = knownTotal
     ? Math.min(100, Math.max(0, Math.round(status.processedSessions / status.totalSessions * 1000) / 10))
     : undefined

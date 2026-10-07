@@ -147,7 +147,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerExportResult',
         create: dsh_plugin_usage_ledger_usageLedgerPlugin_exportCsv_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":769,"column":9},
+      sourceLocation: {"file":"src/host/index.ts","line":770,"column":9},
     },
     {
       id: 'dsh-plugin-usage-ledger#usageLedgerPlugin/snapshot',
@@ -173,7 +173,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerSnapshot',
         create: dsh_plugin_usage_ledger_usageLedgerPlugin_snapshot_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":714,"column":9},
+      sourceLocation: {"file":"src/host/index.ts","line":715,"column":9},
     },
     {
       id: 'dsh-plugin-usage-ledger#usageLedgerPlugin/status',
@@ -189,7 +189,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerStatus',
         create: dsh_plugin_usage_ledger_usageLedgerPlugin_status_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":821,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":822,"column":3},
     },
   ],
 }

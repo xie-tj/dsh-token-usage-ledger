@@ -58,6 +58,26 @@ describe('Background accounting presentation', () => {
     expect(panel?.textContent).toContain('1 / 4')
   })
 
+  it('does not claim an unexplained pause after the governor has permitted replay to resume', async () => {
+    const view=await mount({...progress,state:'paused',pace:{mode:'run',delayMs:450,workShare:0.1}})
+    const panel=view.querySelector('[role="region"]')
+    expect(panel?.textContent).not.toContain('历史回填已暂停，已有统计仍可查看')
+    expect(panel?.textContent).toContain('恢复统计中')
+  })
+
+  it('does not label completed history as paused when resource pacing changes later', async () => {
+    const view=await mount({...progress,state:'paused',processedSessions:4,pace:{mode:'pause',delayMs:15000,workShare:0.1,reason:'memory'}})
+    const panel=view.querySelector('[role="region"]')
+    expect(panel?.textContent).toContain('历史统计已完成')
+    expect(panel?.textContent).not.toContain('已有统计仍可查看')
+  })
+
+  it('does not conceal a paused reader error just because pacing permits work or progress is complete', async () => {
+    const view=await mount({...progress,state:'paused',processedSessions:4,lastError:'reader unavailable',pace:{mode:'run',delayMs:0,workShare:0.25}})
+    expect(view.querySelector('[role="region"]')?.textContent).toContain('reader unavailable')
+    expect(view.querySelector('[role="region"]')?.textContent).not.toContain('恢复统计中')
+  })
+
   it('uses indeterminate progress until the worker has discovered the session count', async () => {
     const view = await mount({...progress,totalSessions:0,processedSessions:0,processedEvents:0})
     const panel = view.querySelector('[role="region"]')

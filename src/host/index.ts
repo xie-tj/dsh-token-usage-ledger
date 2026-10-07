@@ -45,6 +45,7 @@ import type {
 } from './worker-protocol.ts'
 import { UsageWorkerSupervisor } from './supervisor.ts'
 import { releasedJsonlReaderSpec } from './jsonl-reader-spec.ts'
+import { replayStateAfterPace } from './replay-status.ts'
 
 export type * from './types.ts'
 export {
@@ -896,8 +897,9 @@ export class UsageLedgerService extends TypertRemoteService {
       delayMs: next.delayMs,
       ...(next.reason === undefined ? {} : { reason: next.reason }),
     }, 'pace')
-    if (next.mode === 'pause' && this.status.state !== 'failed') {
-      this.status = { ...this.status, state: 'paused', updatedAt: new Date().toISOString() }
+    const state = replayStateAfterPace(this.status, next.mode)
+    if (state !== this.status.state) {
+      this.status = { ...this.status, state, updatedAt: new Date().toISOString() }
     }
   }
 

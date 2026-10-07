@@ -56,6 +56,8 @@ export declare const zh: {
     backfillPausedEventLoop: string;
     backfillTitle: string;
     backfillStateRunning: string;
+    backfillStateResuming: string;
+    backfillResumingHint: string;
     backfillStatePaused: string;
     backfillStateFailed: string;
     backfillStateComplete: string;
@@ -150,6 +152,8 @@ export declare const en: {
     backfillPausedEventLoop: string;
     backfillTitle: string;
     backfillStateRunning: string;
+    backfillStateResuming: string;
+    backfillResumingHint: string;
     backfillStatePaused: string;
     backfillStateFailed: string;
     backfillStateComplete: string;
