@@ -10,6 +10,7 @@ import type {
 import { UsageLedgerMark } from './UsageLedgerMark.tsx'
 import { UsageBackfillStatus } from './UsageBackfillStatus.tsx'
 import { usageTimeText } from './usageTime.ts'
+import { usageChartSeries, type UsageChartBucket, type UsageChartDay as Bucket } from './usageChart.ts'
 import * as styles from './UsageDashboard.module.css'
 
 const css = styles.default
@@ -59,18 +60,6 @@ interface UsageSnapshot {
   readonly daily: readonly Bucket[]
 }
 
-interface Bucket {
-  readonly date: string
-  readonly requests: number
-  readonly input: number
-  readonly output: number
-  readonly cached: number
-  readonly metered: number
-  readonly unmetered: number
-  readonly failed: number
-  readonly retried: number
-}
-
 /** Dependencies supplied from the Usage plugin's apply closure. */
 export interface UsageDashboardInjected {
   /** Read the current Host usage snapshot. */
@@ -100,25 +89,6 @@ function snapshotKey(period: Period, provider: string, model: string): string {
   return JSON.stringify([period, provider, model])
 }
 
-function shiftDay(day: string, offset: number): string {
-  const date = new Date(`${day}T00:00:00.000Z`)
-  date.setUTCDate(date.getUTCDate() + offset)
-  return date.toISOString().slice(0, 10)
-}
-
-function localDay(time: number): string | undefined {
-  if (!Number.isFinite(time) || time <= 0) return undefined
-  const parts = new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date(time))
-  const year = parts.find(part => part.type === 'year')?.value
-  const month = parts.find(part => part.type === 'month')?.value
-  const day = parts.find(part => part.type === 'day')?.value
-  return year === undefined || month === undefined || day === undefined ? undefined : `${year}-${month}-${day}`
-}
-
 function mergeModelRows(rows: readonly ModelRow[]): readonly ModelRow[] {
   const merged = new Map<string, ModelRow>()
   for (const row of rows) {
@@ -143,40 +113,6 @@ function mergeModelRows(rows: readonly ModelRow[]): readonly ModelRow[] {
     })
   }
   return [...merged.values()]
-}
-
-function aggregateModels(events: readonly UsageEvent[], showProvider: boolean): readonly ModelRow[] {
-  const rows = new Map<string, ModelRow>()
-  for (const event of events) {
-    const key = showProvider ? `${event.provider}\u0000${event.model}` : event.model
-    const current = rows.get(key) ?? {
-      provider: showProvider ? event.provider : '',
-      model: event.model,
-      requests: 0,
-      input: 0,
-      output: 0,
-      cached: 0,
-      cacheHit: 0,
-      metered: 0,
-      unmetered: 0,
-      failed: 0,
-      retried: 0,
-    }
-    rows.set(key, {
-      provider: current.provider,
-      model: current.model,
-      requests: current.requests + 1,
-      input: current.input + event.input,
-      output: current.output + event.output,
-      cached: current.cached + event.cached,
-      cacheHit: current.cacheHit + event.cacheHit,
-      metered: current.metered + (event.metered ? 1 : 0),
-      unmetered: current.unmetered + (event.metered ? 0 : 1),
-      failed: current.failed + (event.outcome === 'failure' || event.outcome === 'aborted' ? 1 : 0),
-      retried: current.retried + (event.retried ? 1 : 0),
-    })
-  }
-  return [...rows.values()]
 }
 
 function modelLabel(row: Pick<ModelRow, 'provider' | 'model'>, showProvider: boolean): string {
@@ -263,79 +199,11 @@ function compactNumberText(value: number): string {
 
 function dateText(value: string): string {
   const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00`) : new Date(value)
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
+  return new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'short', day: 'numeric' }).format(date)
 }
 
 function interpolate(template: string, values: Record<string, string>): string {
   return template.replace(/\{([^}]+)\}/g, (_, key: string) => values[key] ?? `{${key}}`)
-}
-
-function selectedEvents(
-  events: readonly UsageEvent[],
-  provider: string,
-  model: string,
-  period: Period,
-  throughDay: string | undefined,
-): readonly UsageEvent[] {
-  const byProvider = provider === 'all' ? events : events.filter(event => event.provider === provider)
-  const byModel = model === 'all' ? byProvider : byProvider.filter(event => event.model === model)
-  if (byModel.length === 0) return byModel
-  const endDay = throughDay ?? [...byModel]
-    .map(event => localDay(event.at))
-    .filter((day): day is string => day !== undefined)
-    .sort()
-    .at(-1)
-  if (endDay === undefined) return byModel
-  const startDay = shiftDay(endDay, -(period === '7d' ? 6 : 29))
-  return byModel.filter((event) => {
-    const day = localDay(event.at)
-    return day !== undefined && day >= startDay && day <= endDay
-  })
-}
-
-function bucketsOf(
-  events: readonly UsageEvent[],
-  period: Period,
-  daily: readonly Bucket[],
-  throughDay: string | undefined,
-  preferDaily: boolean,
-): readonly Bucket[] {
-  const eventDays = events.map(event => localDay(event.at)).filter((day): day is string => day !== undefined)
-  const dailyDays = daily
-    .filter(row => row.requests > 0 || row.input > 0 || row.output > 0 || row.cached > 0 || row.failed > 0)
-    .map(row => row.date)
-  const endDay = throughDay ?? [...(preferDaily ? dailyDays : eventDays)].sort().at(-1) ?? localDay(Date.now()) ?? '1970-01-01'
-  const startDay = shiftDay(endDay, -(period === '7d' ? 6 : 29))
-  const days: string[] = []
-  for (let day = startDay; day <= endDay; day = shiftDay(day, 1)) days.push(day)
-  const buckets = days.map(date => ({ date, requests: 0, input: 0, output: 0, cached: 0, metered: 0, unmetered: 0, failed: 0, retried: 0 }))
-  const indexByDay = new Map(days.map((day, index) => [day, index] as const))
-  if (preferDaily && daily.length > 0) {
-    for (const row of daily) {
-      const index = indexByDay.get(row.date)
-      if (index === undefined) continue
-      buckets[index] = { ...row }
-    }
-    return buckets
-  }
-  for (const event of events) {
-    const day = localDay(event.at)
-    const index = day === undefined ? undefined : indexByDay.get(day)
-    const bucket = index === undefined ? undefined : buckets[index]
-    if (index === undefined || bucket === undefined) continue
-    buckets[index] = {
-      date: bucket.date,
-      requests: bucket.requests + 1,
-      input: bucket.input + event.input,
-      output: bucket.output + event.output,
-      cached: bucket.cached + event.cached,
-      metered: bucket.metered + (event.metered ? 1 : 0),
-      unmetered: bucket.unmetered + (event.metered ? 0 : 1),
-      failed: bucket.failed + (event.outcome === 'failure' || event.outcome === 'aborted' ? 1 : 0),
-      retried: bucket.retried + (event.retried ? 1 : 0),
-    }
-  }
-  return buckets
 }
 
 function curvePath(buckets: readonly Bucket[]): string {
@@ -446,10 +314,8 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
       .map(row => row.model))].sort(),
     [catalog, provider],
   )
-  const buckets = useMemo(
-    () => snapshot === undefined ? [] : period === 'all' ? snapshot.daily.slice(-30) : snapshot.daily,
-    [period, snapshot],
-  )
+  const series = useMemo(() => usageChartSeries(snapshot?.daily ?? []), [snapshot])
+  const buckets = series.buckets
   const visibleModels = useMemo(
     () => [...(showProvider ? models : mergeModelRows(models))].sort((left, right) => totalOf(right) - totalOf(left)),
     [models, showProvider],
@@ -470,8 +336,24 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
   }), { requests: 0, tokens: 0 }), [buckets])
   const curve = useMemo(() => curvePath(buckets), [buckets])
   const activeBucket = target === undefined ? undefined : buckets[target.index]
+  const maxRequests = Math.max(1, ...buckets.map(bucket => bucket.requests))
   const maxTokens = Math.max(1, ...buckets.map(bucket => bucket.input + bucket.output + bucket.cached))
   const tokenText = (value: number): string => fullNumberText(value)
+  const bucketDate = (bucket: UsageChartBucket): string => bucket.date === bucket.endDate
+    ? dateText(bucket.date)
+    : interpolate(t('chartDateRange'), { from: dateText(bucket.date), to: dateText(bucket.endDate) })
+  const grainLabel = series.grain === 'day' ? t('chartGrainDay')
+    : series.grain === 'week' ? t('chartGrainWeek')
+      : series.grain === 'month' ? t('chartGrainMonth')
+        : series.yearsPerBucket === 1 ? t('chartGrainYear')
+          : interpolate(t('chartGrainYears'), { years: exactCountText(series.yearsPerBucket) })
+  const chartAxis = series.fromDay === undefined || series.throughDay === undefined ? null : (
+    <div className={css.chartAxis}>
+      <time dateTime={series.fromDay}>{series.fromDay}</time>
+      <span title={grainLabel}>{grainLabel}</span>
+      <time dateTime={series.throughDay}>{series.throughDay}</time>
+    </div>
+  )
 
   const refresh = (): void => { setRequest(current => current + 1) }
   const exportLedger = (): void => {
@@ -608,9 +490,8 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
                   <path className={css.gridLine} d="M 0 36 H 100" />
                   <path className={css.curve} d={curve} />
                   {buckets.map((bucket, index) => {
-                    const max = Math.max(1, ...buckets.map(candidate => candidate.requests))
                     const x = buckets.length === 1 ? 50 : (index / (buckets.length - 1)) * 100
-                    const y = 36 - (bucket.requests / max) * 30
+                    const y = 36 - (bucket.requests / maxRequests) * 30
                     return <circle key={bucket.date} className={css.curvePoint} cx={x} cy={y} r="0.75" />
                   })}
                 </svg>
@@ -625,7 +506,7 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
                         key={bucket.date}
                         type="button"
                         aria-describedby={target?.kind === 'requests' && target.index === index ? tooltipId : undefined}
-                        aria-label={interpolate(t('requestsOn'), { date: dateText(bucket.date), requests: exactCountText(bucket.requests), failed: exactCountText(bucket.failed), retried: exactCountText(bucket.retried) })}
+                        aria-label={interpolate(t('requestsOn'), { date: bucketDate(bucket), requests: exactCountText(bucket.requests), failed: exactCountText(bucket.failed), retried: exactCountText(bucket.retried) })}
                         onFocus={() => { showTarget(next) }}
                         onPointerEnter={() => { showTarget(next) }}
                         onPointerLeave={() => { setTarget(undefined) }}
@@ -635,6 +516,7 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
                   })}
                 </div>
               </div>
+              {chartAxis}
             </article>
 
             <article className={css.chartCard}>
@@ -655,7 +537,7 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
                       style={barStyle}
                       aria-describedby={target?.kind === 'tokens' && target.index === index ? tooltipId : undefined}
                       aria-label={interpolate(t('tokensOn'), {
-                        date: dateText(bucket.date),
+                        date: bucketDate(bucket),
                         input: tokenText(bucket.input),
                         output: tokenText(bucket.output),
                         cached: tokenText(bucket.cached),
@@ -673,6 +555,7 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
                   )
                 })}
               </div>
+              {chartAxis}
             </article>
           </div>
 
@@ -684,7 +567,7 @@ export function UsageDashboard({ readSnapshot, readStatus, exportCsv, t }: Usage
           >
             {activeBucket === undefined ? null : (
               <>
-                <strong>{dateText(activeBucket.date)}</strong>
+                <strong>{bucketDate(activeBucket)}</strong>
                 {target?.kind === 'requests'
                   ? <span>{interpolate(t('requestsOn'), { date: '', requests: exactCountText(activeBucket.requests), failed: exactCountText(activeBucket.failed), retried: exactCountText(activeBucket.retried) }).replace(/^：|^: /, '')}</span>
                   : <span>{interpolate(t('tokensOn'), { date: '', input: tokenText(activeBucket.input), output: tokenText(activeBucket.output), cached: tokenText(activeBucket.cached), total: tokenText(totalOf(activeBucket)) }).replace(/^：|^: /, '')}</span>}

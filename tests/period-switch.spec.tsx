@@ -89,7 +89,7 @@ describe('Time-range switching',()=>{
     expect(container.querySelectorAll('select')).toHaveLength(3)
   })
 
-  it('keeps all-history chart captions aligned with their visible 30-day series',async()=>{
+  it('covers every historical day in both charts with full-history totals',async()=>{
     const full=snapshot(900,true,90)
     const base=full.daily[0]
     const daily=Array.from({length:90},(_,index)=>({...base,day:new Date(Date.UTC(2026,6,10+index)).toISOString().slice(0,10),requests:10,successfulRequests:10,meteredRequests:10,inputTokens:1000,outputTokens:100}))
@@ -97,8 +97,11 @@ describe('Time-range switching',()=>{
     expect(requestsText(container)).toBe('900')
     const requestChart=[...container.querySelectorAll('h3')].find(node=>node.textContent===zh.requestCurve)?.parentElement
     const tokenChart=[...container.querySelectorAll('h3')].find(node=>node.textContent===zh.tokenFlow)?.parentElement
-    expect(requestChart?.querySelector('span')?.textContent).toBe('300')
-    expect(tokenChart?.querySelector('span')?.textContent).toBe('33,000')
+    expect(requestChart?.querySelector('span')?.textContent).toBe('900')
+    expect(tokenChart?.querySelector('span')?.textContent).toBe('99,000')
+    const firstDay=new Intl.DateTimeFormat(undefined,{year:'numeric',month:'short',day:'numeric'}).format(new Date('2026-07-10T12:00:00'))
+    const labels=[...container.querySelectorAll('button[aria-label]')].map(button=>button.getAttribute('aria-label'))
+    expect(labels.some(label=>label?.includes(firstDay))).toBe(true)
   })
 
   it('retains the last good snapshot only when a refresh fails in the same range',async()=>{

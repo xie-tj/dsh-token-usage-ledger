@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react';
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots';
 import type { UsageLedgerExportRequest, UsageLedgerExportResult, UsageLedgerSnapshot, UsageLedgerSnapshotRequest, UsageLedgerStatus } from '../host/types.js';
+import { type UsageChartDay as Bucket } from './usageChart.js';
 /** Install the dashboard stylesheet and return its disposer.
  * @returns A function that removes the installed stylesheet.
  */
@@ -36,17 +37,6 @@ interface UsageSnapshot {
     readonly events: readonly UsageEvent[];
     readonly models: readonly ModelRow[];
     readonly daily: readonly Bucket[];
-}
-interface Bucket {
-    readonly date: string;
-    readonly requests: number;
-    readonly input: number;
-    readonly output: number;
-    readonly cached: number;
-    readonly metered: number;
-    readonly unmetered: number;
-    readonly failed: number;
-    readonly retried: number;
 }
 /** Dependencies supplied from the Usage plugin's apply closure. */
 export interface UsageDashboardInjected {

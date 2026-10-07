@@ -20,6 +20,12 @@ export declare const zh: {
     period: string;
     allTime: string;
     allHistoryCharts: string;
+    chartGrainDay: string;
+    chartGrainWeek: string;
+    chartGrainMonth: string;
+    chartGrainYear: string;
+    chartGrainYears: string;
+    chartDateRange: string;
     sevenDays: string;
     thirtyDays: string;
     totalTokens: string;
@@ -107,6 +113,12 @@ export declare const en: {
     period: string;
     allTime: string;
     allHistoryCharts: string;
+    chartGrainDay: string;
+    chartGrainWeek: string;
+    chartGrainMonth: string;
+    chartGrainYear: string;
+    chartGrainYears: string;
+    chartDateRange: string;
     sevenDays: string;
     thirtyDays: string;
     totalTokens: string;

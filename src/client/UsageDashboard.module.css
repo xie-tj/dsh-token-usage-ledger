@@ -395,6 +395,20 @@
   line-height: 20px;
 }
 
+.chartAxis {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.chartAxis time { flex: none; font-family: var(--ds-font-family-code); white-space: nowrap; }
+.chartAxis span { min-width: 0; overflow: hidden; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+
 .curveChart {
   position: relative;
   height: 136px;
@@ -468,7 +482,7 @@
   gap: 1px;
   border: 0;
   border-radius: 3px 3px 0 0;
-  padding: 0 2px;
+  padding: 0 1px;
   background: transparent;
   cursor: pointer;
 }
