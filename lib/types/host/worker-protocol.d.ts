@@ -1,5 +1,6 @@
 /** Versioned NDJSON protocol shared by the Host supervisor and backfill worker. */
 import type { UsageSessionEvent } from './event-types.js';
+import type { Branded } from '@deepseek-ai/dsh-brand';
 export declare const USAGE_LEDGER_WORKER_PROTOCOL = 1;
 /** JSON-safe isolated reader description, supplied by a provider or the released JSONL adapter. */
 export interface WorkerReaderSpec {
@@ -9,8 +10,30 @@ export interface WorkerReaderSpec {
     /** The worker module streams its own session headers without a Host list(). */
     readonly supportsSessionListing?: boolean;
 }
+/** Stable source configuration identity, independent of the plugin install directory. */
+export type WorkerSourceIdentity = Branded<'UsageLedgerSourceIdentity'>;
+/** Reader-owned metadata fingerprint usable across process restarts. */
+export type WorkerSourceFingerprint = Branded<'UsageLedgerSourceFingerprint'>;
+/** Metadata observation used to prove that a completed replay still describes the same source. */
+export interface WorkerSourceStamp {
+    readonly source: WorkerSourceIdentity;
+    readonly fingerprint: WorkerSourceFingerprint;
+}
+/** Brand a reader-generated source identity. @param value - stable source description. @returns branded identity. */
+export declare function workerSourceIdentity(value: string): WorkerSourceIdentity;
+/** Brand a reader-generated fingerprint. @param value - durable metadata fingerprint. @returns branded fingerprint. */
+export declare function workerSourceFingerprint(value: string): WorkerSourceFingerprint;
 /** Runtime contract implemented by an isolated historical reader module. */
 export interface WorkerReaderModule {
+    /** A lookup may use this pass's listing snapshot; verify must observe fresh metadata after EOF. */
+    getSourceStamp?: (options: Readonly<Record<string, boolean | number | string>> | undefined, request: {
+        readonly session: {
+            readonly id: string;
+            readonly createdAt: number;
+            readonly cwd?: string;
+        };
+        readonly phase: 'lookup' | 'verify';
+    }, signal?: AbortSignal) => Promise<WorkerSourceStamp | undefined>;
     readSessionBatches(options: Readonly<Record<string, boolean | number | string>> | undefined, request: {
         readonly session: {
             readonly id: string;
@@ -93,6 +116,7 @@ export interface WorkerProgressFrame {
     readonly totalSessions: number;
     readonly processedSessions: number;
     readonly processedEvents: number;
+    readonly reusedSessions?: number;
     readonly currentSessionId?: string;
     readonly backfillDays: number;
 }

@@ -10,9 +10,9 @@ dsh-plugin-usage-ledger 为 DeepSeek Harness Web profile 提供持久化的模�
 
 SQLite 是唯一账本存储：
 
-- 使用 profile 中 storages/usage-ledger-v4.sqlite；
+- 使用固定的 dsh home 路径 storages/usage-ledger-v4.sqlite，插件版本变化不更换账本文件；
 - 每个 session 只在 worker 内加载当前 replay cursor 和仍然活跃的 request；
-- 已完成 call 永远留在 SQLite，不会进入常驻 Map；
+- 已完成 call 与回放游标留在 SQLite，不会进入常驻 Map；schema 5 在同一文件里添加源检查点，原地接纳 schema 4 并保留既有记录，不支持降级；
 - Snapshot 使用分页数据库扫描和事件循环让出，聚合值完整，逐条 events 有固定上限；
 - 旧 usage_ledger.json、usage-ledger-v2.sqlite 和 usage-ledger-v3.sqlite 不读取、不删除、不迁移。v4 从 retained session 日志重新统计。
 
@@ -34,7 +34,9 @@ Usage 页面以独立状态面板显示统计中、暂停原因、异常或历�
 
 读取历史有两条路径：提供方若暴露 backgroundReaderSpec，继续使用其独立读取模块；发布版 DSH 0.2.0-rc.2 的 JSONL 提供方不暴露该接口，插件改由自身的 JSONL adapter 在低优先级 worker 内挂载同一提供方、同一 root 与 compression，只调用 list、open(id, read) 与 handle.read。解压、格式迁移的只读投影、校验和 inheritedEventCount 均由官方公开接口处理，插件不直接解析物理日志，不打开 write handle，也不发布迁移或修改源日志。目录枚举也在 worker 内完成，主进程不先创建全量会话列表。
 
-公开 read handle 接口可能在打开时解码单个完整会话；事件批次限制的是 reducer 每次处理量，不是提供方解码峰值。adapter 每次扫描会话创建新提供方实例并在完成或取消时释放，避免缓存保留之前会话的正文。特别大的单会话仍受 workerMaxHeapMiB 限制。新建但尚未物化的日志等待后续 rescan，已有 SQLite cursor 保证重启后不重复记账。
+公开 read handle 接口可能在打开时解码单个完整会话；事件批次限制的是 reducer 每次处理量，不是提供方解码峰值。adapter 每次扫描会话创建新提供方实例并在完成或取消时释放，避免缓存保留之前会话的正文。特别大的单会话仍受 workerMaxHeapMiB 限制。新建但尚未物化的日志等待后续 rescan。源检查点把已经读到末尾的源元数据和已提交游标一起保存：同一源配置、文件版本和游标匹配时直接复用，不打开日志解码；追加或新增日志只从已有游标继续。记录检查点前再次核对元数据，读取中变动、被抢占或失败的扫描不能标记为完整。源标识包含存储根、压缩模式和提供方版本，不包含插件安装目录或插件版本。当前格式使用文件身份、大小与纳秒时间戳；旧格式逻辑投影还依赖选中的语料元数据，相关文件变化会保守失效。SDK 的进程内 revision 不作为跨进程的持久化凭据。
+
+首次从 schema 4 升级时，已有请求和游标立即保留；源检查点尚未建立，需要一次尾部核对来建立证明，不从零重算旧请求。后续启动只枚举元数据并读取新增或变更的会话。状态显示“已检查会话”“本轮处理事件”及复用会话数，本轮事件数为零不表示历史账本丢失。
 
 自定义 persistence 若提供 reader、未提供 lister，仍使用一次 Host 兼容性 listing；没有可用独立 reader 且不是受支持 JSONL 实例时仅启用 live ledger，并明确报告历史回填不可用。提供方启动异常会保留实际错误，不再替换为缺少接口的泛化消息。
 

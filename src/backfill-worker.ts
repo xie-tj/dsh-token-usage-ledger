@@ -44,6 +44,7 @@ let pumping = false
 let outputChain = Promise.resolve()
 let processedSessions = 0
 let processedEvents = 0
+let reusedSessions = 0
 let totalSessions = 0
 let lastProgressAt = 0
 let pace: { mode: 'run' | 'pause'; delayMs: number } = { mode: 'run', delayMs: 0 }
@@ -126,6 +127,7 @@ function markProgress(
     totalSessions,
     processedSessions,
     processedEvents,
+    reusedSessions,
     ...(currentSessionId === undefined ? {} : { currentSessionId }),
     backfillDays: init?.config.backfillDays ?? 0,
   })
@@ -318,6 +320,11 @@ async function processSession(task: SessionTask): Promise<boolean> {
     return false
   }
   if (reader === undefined) return false
+  const before = await reader.getSourceStamp?.(init.readerSpec?.options, { session, phase: 'lookup' })
+  if (before !== undefined && requireDatabase().sourceUnchanged(session,before,reducer.resumeSeq(session)-1)) {
+    if(task.countHistory===true)reusedSessions+=1
+    return true
+  }
   const batches = reader.readSessionBatches(
     init.readerSpec?.options,
     {
@@ -342,6 +349,13 @@ async function processSession(task: SessionTask): Promise<boolean> {
       return false
     }
     sliceStarted = performance.now()
+  }
+  if (stopped) return false
+  if (before !== undefined) {
+    const after = await reader.getSourceStamp?.(init.readerSpec?.options,{session,phase:'verify'})
+    if(after?.source===before.source && after.fingerprint===before.fingerprint) {
+      requireDatabase().completeSource(session,after,reducer.resumeSeq(session)-1)
+    }
   }
   return true
 }

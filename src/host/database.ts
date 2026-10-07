@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite'
 import type { StatementSync } from 'node:sqlite'
 import { createUsageAttemptId } from './event-types.ts'
 import type { LedgerMutation } from './reducer.ts'
+import type { WorkerSourceStamp } from './worker-protocol.ts'
 import type {
   UsageLedgerCallRow,
   UsageLedgerSessionRow,
@@ -13,7 +14,7 @@ import type {
 } from './spec.ts'
 
 /** Dedicated SQLite file format. It intentionally does not read v2/v3 stores. */
-export const USAGE_LEDGER_SQLITE_SCHEMA_VERSION = 4
+export const USAGE_LEDGER_SQLITE_SCHEMA_VERSION = 5
 
 /** SQLite application id used to reject unrelated user files. */
 export const USAGE_LEDGER_SQLITE_APPLICATION_ID = 0x44534c34
@@ -123,7 +124,7 @@ function configureDatabase(db: DatabaseSync, path: string): void {
   if (applicationId.application_id === 0 && userTables.length > 0) {
     throw new Error(`usage ledger database at "${path}" is not empty`)
   }
-  if (applicationId.application_id === USAGE_LEDGER_SQLITE_APPLICATION_ID && version.user_version !== USAGE_LEDGER_SQLITE_SCHEMA_VERSION) {
+  if (applicationId.application_id === USAGE_LEDGER_SQLITE_APPLICATION_ID && version.user_version !== 4 && version.user_version !== USAGE_LEDGER_SQLITE_SCHEMA_VERSION) {
     throw new Error(
       `usage ledger database at "${path}" has schema ${String(version.user_version)}, expected ${String(USAGE_LEDGER_SQLITE_SCHEMA_VERSION)}`,
     )
@@ -135,46 +136,63 @@ function configureDatabase(db: DatabaseSync, path: string): void {
   db.exec('PRAGMA cache_size = -8192')
   db.exec('PRAGMA temp_store = FILE')
   db.exec('PRAGMA mmap_size = 0')
-  db.exec(`PRAGMA application_id = ${String(USAGE_LEDGER_SQLITE_APPLICATION_ID)}`)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      session_id      TEXT NOT NULL,
-      created_at      INTEGER NOT NULL,
-      workspace       TEXT,
-      observed_seq    INTEGER NOT NULL,
-      active_attempts TEXT NOT NULL,
-      route_provider  TEXT,
-      route_model     TEXT,
-      PRIMARY KEY (session_id, created_at)
-    ) STRICT
-  `)
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS calls (
-      key                            TEXT PRIMARY KEY,
-      session_id                     TEXT NOT NULL,
-      created_at                     INTEGER NOT NULL,
-      workspace                      TEXT,
-      attempt_id                     TEXT NOT NULL,
-      turn                           INTEGER NOT NULL,
-      step                           INTEGER NOT NULL,
-      provider                       TEXT NOT NULL,
-      model                          TEXT NOT NULL,
-      started_at                     INTEGER NOT NULL,
-      outcome                        TEXT CHECK (outcome IN ('success', 'failure', 'aborted')),
-      retry_scheduled                INTEGER NOT NULL CHECK (retry_scheduled IN (0, 1)),
-      provisional_input_tokens       INTEGER,
-      provisional_output_tokens      INTEGER,
-      provisional_cache_read_tokens  INTEGER,
-      provisional_cache_write_tokens INTEGER,
-      final_input_tokens             INTEGER,
-      final_output_tokens            INTEGER,
-      final_cache_read_tokens        INTEGER,
-      final_cache_write_tokens       INTEGER
-    ) STRICT
-  `)
-  db.exec('CREATE INDEX IF NOT EXISTS calls_started_at ON calls (started_at, key)')
-  db.exec('CREATE INDEX IF NOT EXISTS calls_session ON calls (session_id, created_at, attempt_id)')
-  db.exec(`PRAGMA user_version = ${String(USAGE_LEDGER_SQLITE_SCHEMA_VERSION)}`)
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    db.exec(`PRAGMA application_id = ${String(USAGE_LEDGER_SQLITE_APPLICATION_ID)}`)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        session_id      TEXT NOT NULL,
+        created_at      INTEGER NOT NULL,
+        workspace       TEXT,
+        observed_seq    INTEGER NOT NULL,
+        active_attempts TEXT NOT NULL,
+        route_provider  TEXT,
+        route_model     TEXT,
+        PRIMARY KEY (session_id, created_at)
+      ) STRICT
+    `)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS calls (
+        key                            TEXT PRIMARY KEY,
+        session_id                     TEXT NOT NULL,
+        created_at                     INTEGER NOT NULL,
+        workspace                      TEXT,
+        attempt_id                     TEXT NOT NULL,
+        turn                           INTEGER NOT NULL,
+        step                           INTEGER NOT NULL,
+        provider                       TEXT NOT NULL,
+        model                          TEXT NOT NULL,
+        started_at                     INTEGER NOT NULL,
+        outcome                        TEXT CHECK (outcome IN ('success', 'failure', 'aborted')),
+        retry_scheduled                INTEGER NOT NULL CHECK (retry_scheduled IN (0, 1)),
+        provisional_input_tokens       INTEGER,
+        provisional_output_tokens      INTEGER,
+        provisional_cache_read_tokens  INTEGER,
+        provisional_cache_write_tokens INTEGER,
+        final_input_tokens             INTEGER,
+        final_output_tokens            INTEGER,
+        final_cache_read_tokens        INTEGER,
+        final_cache_write_tokens       INTEGER
+      ) STRICT
+    `)
+    db.exec('CREATE INDEX IF NOT EXISTS calls_started_at ON calls (started_at, key)')
+    db.exec('CREATE INDEX IF NOT EXISTS calls_session ON calls (session_id, created_at, attempt_id)')
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS source_checkpoints (
+        source TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        fingerprint TEXT NOT NULL,
+        observed_seq INTEGER NOT NULL CHECK (observed_seq >= -1),
+        PRIMARY KEY (source, session_id, created_at)
+      ) STRICT
+    `)
+    db.exec(`PRAGMA user_version = ${String(USAGE_LEDGER_SQLITE_SCHEMA_VERSION)}`)
+    db.exec('COMMIT')
+  } catch (error: unknown) {
+    db.exec('ROLLBACK')
+    throw error
+  }
 }
 
 function decodeUsage(
@@ -295,6 +313,32 @@ export class UsageLedgerDatabase {
   `)
   }
 
+  /**
+   * Check whether an EOF observation still matches the persisted replay cursor.
+   * @param session - stored lifecycle identity.
+   * @param stamp - current reader source observation.
+   * @param observedSeq - last event represented by the loaded cursor; -1 for an empty log.
+   * @returns true only when source metadata and the saved ledger position both match.
+   */
+  sourceUnchanged(session: {readonly id:string;readonly createdAt:number}, stamp: WorkerSourceStamp, observedSeq: number): boolean {
+    const row=this.db.prepare("SELECT fingerprint, observed_seq FROM source_checkpoints WHERE source = ? AND session_id = ? AND created_at = ?").get(stamp.source,session.id,session.createdAt) as {fingerprint:string;observed_seq:number}|undefined
+    return row?.fingerprint===stamp.fingerprint && row.observed_seq===observedSeq
+  }
+
+  /**
+   * Save EOF only for the cursor that is still stored by this connection.
+   * @param session - stored lifecycle identity.
+   * @param stamp - stable observation verified after the reader finishes.
+   * @param observedSeq - last event applied and persisted before this checkpoint.
+   */
+  completeSource(session: {readonly id:string;readonly createdAt:number}, stamp: WorkerSourceStamp, observedSeq: number): void {
+    this.db.prepare(`
+      INSERT INTO source_checkpoints (source,session_id,created_at,fingerprint,observed_seq)
+      SELECT ?,?,?,?,? WHERE COALESCE((SELECT observed_seq FROM sessions WHERE session_id=? AND created_at=?),-1)=?
+      ON CONFLICT(source,session_id,created_at) DO UPDATE SET fingerprint=excluded.fingerprint,observed_seq=excluded.observed_seq
+    `).run(stamp.source,session.id,session.createdAt,stamp.fingerprint,observedSeq,session.id,session.createdAt,observedSeq)
+  }
+
   /** Apply a bounded mutation batch as one durable SQLite transaction. */
   applyMutations(mutations: readonly LedgerMutation[]): void {
     if (mutations.length === 0) return
@@ -321,6 +365,7 @@ export class UsageLedgerDatabase {
           )
         } else if (mutation.type === 'cursor-upsert') {
           const row = mutation.row
+          this.db.prepare('DELETE FROM source_checkpoints WHERE session_id = ? AND created_at = ?').run(mutation.sessionId,row.createdAt)
           this.putSession.run(
             mutation.sessionId,
             row.createdAt,

@@ -63,6 +63,7 @@ export declare const zh: {
     backfillStateLoading: string;
     backfillStateUnavailable: string;
     backfillRunningHint: string;
+    backfillReused: string;
     backfillPausedHint: string;
     backfillFailedHint: string;
     backfillCompleteHint: string;
@@ -156,6 +157,7 @@ export declare const en: {
     backfillStateLoading: string;
     backfillStateUnavailable: string;
     backfillRunningHint: string;
+    backfillReused: string;
     backfillPausedHint: string;
     backfillFailedHint: string;
     backfillCompleteHint: string;

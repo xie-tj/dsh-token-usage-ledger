@@ -1,9 +1,10 @@
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { readSessionBatches } from '../lib/types/jsonl-reader.js'
+import { releasedJsonlReaderSpec } from '../src/host/jsonl-reader-spec.ts'
 import { Context } from '@deepseek-ai/cordis'
 import JsonlPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { SessionId, SessionSeq, SESSION_FORMAT_VERSION, type SessionEvent } from '@deepseek-ai/dsh-session'
@@ -83,6 +84,12 @@ describe('Released JSONL persistence compatibility', () => {
       }
       const before = await logBytes(root)
       expect(before.size).toBe(2)
+      const actualReader=await releasedJsonlReaderSpec(ctx.sessionPersistence)
+      if(actualReader===undefined)throw new Error('Released JSONL reader not resolved')
+      Object.defineProperty(ctx.get('sessionPersistence'),'backgroundReaderSpec',{configurable:true,writable:true,value:()=>({
+        ...actualReader,
+        options:{...actualReader.options,providerModule:new URL('./fixtures/jsonl-observed-provider.mjs',import.meta.url).href},
+      })})
       ledger = ctx.plugin(Ledger,{databasePath:join(temporary,'ledger.sqlite'),backfillPowerMode:'always',backfillPauseRssMiB:1048576})
       await ledger.await()
       await waitForHistory(ctx,2)
@@ -90,12 +97,41 @@ describe('Released JSONL persistence compatibility', () => {
       const snapshot=await ctx.usageLedger.snapshot({all:true,timeZone:'UTC'})
       expect(snapshot.models).toMatchObject([{requests:1,inputTokens:12,outputTokens:8}])
       await ledger.dispose()
+      await writeFile(join(temporary,'log-opens.ndjson'),'')
       ledger=ctx.plugin(Ledger,{databasePath:join(temporary,'ledger.sqlite'),backfillPowerMode:'always',backfillPauseRssMiB:1048576})
       await ledger.await()
       await waitForHistory(ctx,2)
       const resumed=await ctx.usageLedger.snapshot({all:true,timeZone:'UTC'})
       expect(resumed.models).toEqual(snapshot.models)
       expect(await logBytes(root)).toEqual(before)
+      expect(await readFile(join(temporary,'log-opens.ndjson'),'utf8'), 'unchanged logs should not be decoded after a plugin restart').toBe('')
+      expect(ctx.usageLedger.statusSnapshot()).toMatchObject({reusedSessions:2,processedEvents:0})
+
+      await ledger.dispose()
+      const writer=await ctx.sessionPersistence.open(SessionId('recent'),'write')
+      try {
+        await writer.append([{type:'step/end',seq:SessionSeq(3),time:now+3,data:{turn:1,step:1}}])
+        await writer.flush()
+      } finally {await writer.close()}
+      await writeFile(join(temporary,'log-opens.ndjson'),'')
+      ledger=ctx.plugin(Ledger,{databasePath:join(temporary,'ledger.sqlite'),backfillPowerMode:'always',backfillPauseRssMiB:1048576})
+      await ledger.await()
+      await waitForHistory(ctx,2)
+      const changed=(await readFile(join(temporary,'log-opens.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line).id)
+      expect(changed).toEqual(['recent'])
+      expect(ctx.usageLedger.statusSnapshot()).toMatchObject({reusedSessions:1,processedEvents:1})
+      expect((await ctx.usageLedger.snapshot({all:true,timeZone:'UTC'})).models).toEqual(snapshot.models)
+
+      await ledger.dispose()
+      const fresh=await ctx.sessionPersistence.create({id:SessionId('new'),version:SESSION_FORMAT_VERSION,createdAt:now+100,isSeeded:false})
+      try {await fresh.flush()} finally {await fresh.close()}
+      await writeFile(join(temporary,'log-opens.ndjson'),'')
+      ledger=ctx.plugin(Ledger,{databasePath:join(temporary,'ledger.sqlite'),backfillPowerMode:'always',backfillPauseRssMiB:1048576})
+      await ledger.await()
+      await waitForHistory(ctx,3)
+      const added=(await readFile(join(temporary,'log-opens.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line).id)
+      expect(added).toEqual(['new'])
+      expect(ctx.usageLedger.statusSnapshot()).toMatchObject({reusedSessions:2})
     } finally {
       await ledger?.dispose()
       await provider.dispose()

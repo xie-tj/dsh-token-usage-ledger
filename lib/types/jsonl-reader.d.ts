@@ -1,4 +1,13 @@
-import type { WorkerReaderModule } from './host/worker-protocol.js';
+import { type WorkerReaderModule } from './host/worker-protocol.js';
+/**
+ * Observe the JSONL inputs of a replay without decoding event bodies.
+ * @param options - root, encoding, and selected provider module.
+ * @param request - stored lifecycle and whether to reuse listing-time metadata or verify fresh EOF inputs.
+ * @param signal - optional cancellation.
+ * @returns a durable fingerprint; missing or unmaterialized sessions provide no reusable checkpoint.
+ * Current logs use their physical revision. Historical projections also depend on the selected corpus.
+ */
+export declare const getSourceStamp: NonNullable<WorkerReaderModule['getSourceStamp']>;
 /**
  * List headers inside the isolated worker through the released provider's metadata API.
  * @param options - provider file URL, root, and physical encoding from the Host.

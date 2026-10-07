@@ -1,9 +1,10 @@
 /** Bounded SQLite reader and writer for the private Usage Ledger database. */
 import { DatabaseSync } from 'node:sqlite';
 import type { LedgerMutation } from './reducer.js';
+import type { WorkerSourceStamp } from './worker-protocol.js';
 import type { UsageLedgerCallRow, UsageLedgerSessionRow } from './spec.js';
 /** Dedicated SQLite file format. It intentionally does not read v2/v3 stores. */
-export declare const USAGE_LEDGER_SQLITE_SCHEMA_VERSION = 4;
+export declare const USAGE_LEDGER_SQLITE_SCHEMA_VERSION = 5;
 /** SQLite application id used to reject unrelated user files. */
 export declare const USAGE_LEDGER_SQLITE_APPLICATION_ID = 1146309684;
 /** One page of call rows scanned in timestamp/key order. */
@@ -46,6 +47,27 @@ export declare class UsageLedgerDatabase {
     private readonly putCall;
     private readonly putSession;
     constructor(db: DatabaseSync);
+    /**
+     * Check whether an EOF observation still matches the persisted replay cursor.
+     * @param session - stored lifecycle identity.
+     * @param stamp - current reader source observation.
+     * @param observedSeq - last event represented by the loaded cursor; -1 for an empty log.
+     * @returns true only when source metadata and the saved ledger position both match.
+     */
+    sourceUnchanged(session: {
+        readonly id: string;
+        readonly createdAt: number;
+    }, stamp: WorkerSourceStamp, observedSeq: number): boolean;
+    /**
+     * Save EOF only for the cursor that is still stored by this connection.
+     * @param session - stored lifecycle identity.
+     * @param stamp - stable observation verified after the reader finishes.
+     * @param observedSeq - last event applied and persisted before this checkpoint.
+     */
+    completeSource(session: {
+        readonly id: string;
+        readonly createdAt: number;
+    }, stamp: WorkerSourceStamp, observedSeq: number): void;
     /** Apply a bounded mutation batch as one durable SQLite transaction. */
     applyMutations(mutations: readonly LedgerMutation[]): void;
     /** Load only one session's cursor and currently active call rows. */

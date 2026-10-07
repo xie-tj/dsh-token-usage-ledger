@@ -116,6 +116,13 @@ describe('Background accounting presentation', () => {
     expect(panel?.textContent).toContain('1 / 4')
   })
 
+  it('explains restored results without treating the current-run event count as a lost ledger', async () => {
+    const view=await mount({...progress,state:'idle',processedSessions:4,processedEvents:0,reusedSessions:4})
+    const panel=view.querySelector('[role="region"]')
+    expect(panel?.textContent).toContain('已复用 4 个未变会话的持久化结果')
+    expect(panel?.textContent).toContain('本轮处理事件')
+  })
+
   it('shows an unavailable state instead of making up progress', async () => {
     const view = await mount(async () => {throw new Error('offline')})
     const panel=view.querySelector('[role="region"]')
@@ -127,8 +134,8 @@ describe('Background accounting presentation', () => {
     const view = await mount(progress,{english:true})
     const panel=view.querySelector('[role="region"][aria-label="Background accounting"]')
     expect(panel?.textContent).toContain('Running')
-    expect(panel?.textContent).toContain('Sessions processed')
-    expect(panel?.textContent).toContain('Events processed')
+    expect(panel?.textContent).toContain('Sessions checked')
+    expect(panel?.textContent).toContain('Events processed this run')
     expect(panel?.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('Session scan progress')
   })
 })

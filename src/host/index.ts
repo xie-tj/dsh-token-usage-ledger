@@ -831,6 +831,7 @@ export class UsageLedgerService extends TypertRemoteService {
           totalSessions: frame.totalSessions,
           processedSessions: frame.processedSessions,
           processedEvents: frame.processedEvents,
+          reusedSessions: frame.reusedSessions ?? 0,
           updatedAt: new Date().toISOString(),
           ...(frame.currentSessionId === undefined ? { currentSessionId: undefined } : { currentSessionId: frame.currentSessionId }),
         }

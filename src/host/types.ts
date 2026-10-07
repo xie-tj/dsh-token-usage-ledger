@@ -150,6 +150,8 @@ export interface UsageLedgerStatus {
   readonly processedSessions: number
   /** Logical events observed by the worker. */
   readonly processedEvents: number
+  /** Historical sessions restored from unchanged source checkpoints during this run. */
+  readonly reusedSessions?: number
   /** Automatic historical window in days. */
   readonly backfillDays: number
   /** Whether the worker scans all history or only the recent priority window. */

@@ -1,9 +1,11 @@
 /** Read-only worker adapter using released JSONL public handles, not physical log parsing. */
 import { createRequire } from 'node:module'
-import { isAbsolute } from 'node:path'
+import { createHash } from 'node:crypto'
+import { readdir, stat, readFile } from 'node:fs/promises'
+import { isAbsolute, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { SessionHandle } from '@deepseek-ai/dsh-session-persistence'
-import type { WorkerReaderModule } from './host/worker-protocol.ts'
+import { workerSourceFingerprint, workerSourceIdentity, type WorkerReaderModule, type WorkerSourceStamp } from './host/worker-protocol.ts'
 
 type Options = Readonly<Record<string, boolean | number | string>> | undefined
 
@@ -24,10 +26,77 @@ async function openProvider(options: Options) {
   const {SessionId}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-session')).href) as typeof import('@deepseek-ai/dsh-session')
   const {SessionPersistenceNotFoundError}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-session-persistence')).href) as typeof import('@deepseek-ai/dsh-session-persistence')
   const {default:Jsonl}=await import(config.providerModule.href) as typeof import('@deepseek-ai/dsh-session-persistence-jsonl')
+  const packageJson=JSON.parse(await readFile(require.resolve('@deepseek-ai/dsh-session-persistence-jsonl/package.json'),'utf8')) as {version:string}
   const ctx=new Context()
   const fiber=ctx.plugin(Jsonl,{root:config.root,compression:config.compression})
   try {await fiber.await()} catch (error: unknown) {await fiber.dispose();throw error}
-  return {provider:ctx.sessionPersistence,fiber,SessionId,SessionPersistenceNotFoundError}
+  return {provider:ctx.sessionPersistence as InstanceType<typeof Jsonl>,fiber,SessionId,SessionPersistenceNotFoundError,config,providerVersion:packageJson.version}
+}
+
+
+// Listing observations are owned by this worker's immutable reader options and released with them.
+const listingCorpus=new WeakMap<NonNullable<Options>, WorkerSourceStamp>()
+
+async function physicalObservation(path: string, root: string): Promise<readonly string[]> {
+  const value=await stat(path,{bigint:true})
+  if(!value.isFile())throw new Error('JSONL source artifact is not a file')
+  return [relative(root,path),value.dev.toString(),value.ino.toString(),value.size.toString(),value.mtimeNs.toString(),value.ctimeNs.toString()]
+}
+
+async function corpusFingerprint(root: string, compression: 'none' | 'zstd', signal?: AbortSignal): Promise<string> {
+  const observations: (readonly string[])[]=[]
+  for(const project of await readdir(root,{withFileTypes:true})) {
+    signal?.throwIfAborted()
+    if(!project.isDirectory())continue
+    const projectPath=join(root,project.name)
+    for(const session of await readdir(projectPath,{withFileTypes:true})) {
+      signal?.throwIfAborted()
+      if(!session.isDirectory())continue
+      const path=join(projectPath,session.name)
+      let selected: {name:string;version:number}|undefined
+      for(const file of await readdir(path)) {
+        const match=/^session(?:\.v([1-9][0-9]*))?\.jsonl(\.zstd)?$/.exec(file)
+        if(match===null || (compression==='zstd')!==(match[2]!==undefined))continue
+        const version=match[1]===undefined?0:Number(match[1])
+        if(selected===undefined || version>selected.version)selected={name:file,version}
+      }
+      if(selected!==undefined)observations.push(await physicalObservation(join(path,selected.name),root))
+    }
+  }
+  observations.sort((left,right)=>left[0].localeCompare(right[0]))
+  return createHash('sha256').update(JSON.stringify(observations)).digest('hex')
+}
+
+function sourceIdentity(config: ReturnType<typeof resolveOptions>, providerVersion: string) {
+  return workerSourceIdentity(JSON.stringify({reader:'released-jsonl-checkpoint-v1',root:config.root,compression:config.compression,providerVersion}))
+}
+
+/**
+ * Observe the JSONL inputs of a replay without decoding event bodies.
+ * @param options - root, encoding, and selected provider module.
+ * @param request - stored lifecycle and whether to reuse listing-time metadata or verify fresh EOF inputs.
+ * @param signal - optional cancellation.
+ * @returns a durable fingerprint; missing or unmaterialized sessions provide no reusable checkpoint.
+ * Current logs use their physical revision. Historical projections also depend on the selected corpus.
+ */
+export const getSourceStamp: NonNullable<WorkerReaderModule['getSourceStamp']> = async (options,request,signal) => {
+  signal?.throwIfAborted()
+  const {provider,fiber,SessionId,config,providerVersion}=await openProvider(options)
+  try {
+    const id=SessionId(request.session.id)
+    const snapshot=await provider.stat(id,{signal})
+    if(snapshot===undefined || snapshot.header.createdAt!==request.session.createdAt)return undefined
+    const source=sourceIdentity(config,providerVersion)
+    const current=await provider.resolveCurrentLog(id,signal)
+    if(current!==undefined) {
+      const observation=await physicalObservation(current,config.root)
+      return {source,fingerprint:workerSourceFingerprint(createHash('sha256').update(JSON.stringify({current:observation})).digest('hex'))}
+    }
+    const listed=options===undefined?undefined:listingCorpus.get(options)
+    if(request.phase==='lookup' && listed?.source===source)return listed
+    const corpus=await corpusFingerprint(config.root,config.compression,signal)
+    return {source,fingerprint:workerSourceFingerprint('historical:'+corpus)}
+  } finally {await fiber.dispose()}
 }
 
 /**
@@ -39,9 +108,14 @@ async function openProvider(options: Options) {
  */
 export const listSessionHeaders: NonNullable<WorkerReaderModule['listSessionHeaders']> = async function* (options,request,signal) {
   signal?.throwIfAborted()
-  const {provider,fiber}=await openProvider(options)
+  const {provider,fiber,config,providerVersion}=await openProvider(options)
   try {
     const snapshots=await provider.list({signal})
+    if(options!==undefined && snapshots.length>0) {
+      // Historical decoding may resolve other sessions; its reusable input is the selected corpus.
+      const corpus=await corpusFingerprint(config.root,config.compression,signal)
+      listingCorpus.set(options,{source:sourceIdentity(config,providerVersion),fingerprint:workerSourceFingerprint('historical:'+corpus)})
+    }
     for(const {header} of snapshots) {
       signal?.throwIfAborted()
       if(request.createdAtAfter !== undefined && header.createdAt < request.createdAtAfter)continue
