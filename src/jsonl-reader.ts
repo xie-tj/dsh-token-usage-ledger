@@ -1,11 +1,10 @@
 /** Read-only worker adapter using released JSONL public handles, not physical log parsing. */
 import { createRequire } from 'node:module'
-import { createHash } from 'node:crypto'
-import { readdir, stat, readFile } from 'node:fs/promises'
-import { isAbsolute, join, relative } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { isAbsolute } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { SessionHandle } from '@deepseek-ai/dsh-session-persistence'
-import { workerSourceFingerprint, workerSourceIdentity, type WorkerReaderModule, type WorkerSourceStamp } from './host/worker-protocol.ts'
+import { workerSourceFingerprint, workerSourceIdentity, type WorkerReaderModule, type WorkerSourceFingerprint, type WorkerSourceStamp } from './host/worker-protocol.ts'
 
 type Options = Readonly<Record<string, boolean | number | string>> | undefined
 
@@ -56,38 +55,34 @@ async function openProvider(options: Options): Promise<OpenedProvider> {
   try {return await pending} catch (error: unknown) {providers.delete(options);throw error}
 }
 
-async function physicalObservation(path: string, root: string): Promise<readonly string[]> {
-  const value=await stat(path,{bigint:true})
-  if(!value.isFile())throw new Error('JSONL source artifact is not a file')
-  return [relative(root,path),value.dev.toString(),value.ino.toString(),value.size.toString(),value.mtimeNs.toString(),value.ctimeNs.toString()]
-}
-
-async function corpusFingerprint(root: string, compression: 'none' | 'zstd', signal?: AbortSignal): Promise<string> {
-  const observations: (readonly string[])[]=[]
-  for(const project of await readdir(root,{withFileTypes:true})) {
-    signal?.throwIfAborted()
-    if(!project.isDirectory())continue
-    const projectPath=join(root,project.name)
-    for(const session of await readdir(projectPath,{withFileTypes:true})) {
-      signal?.throwIfAborted()
-      if(!session.isDirectory())continue
-      const path=join(projectPath,session.name)
-      let selected: {name:string;version:number}|undefined
-      for(const file of await readdir(path)) {
-        const match=/^session(?:\.v([1-9][0-9]*))?\.jsonl(\.zstd)?$/.exec(file)
-        if(match===null || (compression==='zstd')!==(match[2]!==undefined))continue
-        const version=match[1]===undefined?0:Number(match[1])
-        if(selected===undefined || version>selected.version)selected={name:file,version}
-      }
-      if(selected!==undefined)observations.push(await physicalObservation(join(path,selected.name),root))
-    }
-  }
-  observations.sort((left,right)=>left[0].localeCompare(right[0]))
-  return createHash('sha256').update(JSON.stringify(observations)).digest('hex')
-}
-
+/**
+/**
+ * Identify the reader configuration and released provider version that produced a fingerprint.
+ * @param config - validated reader options.
+ * @param providerVersion - installed released provider version.
+ * @returns an opaque identity; it excludes the plugin install path and plugin version.
+ */
 function sourceIdentity(config: ReturnType<typeof resolveOptions>, providerVersion: string) {
-  return workerSourceIdentity(JSON.stringify({reader:'released-jsonl-checkpoint-v1',root:config.root,compression:config.compression,providerVersion}))
+  return workerSourceIdentity(JSON.stringify({reader:'released-jsonl-checkpoint-v2',root:config.root,compression:config.compression,providerVersion}))
+}
+
+/**
+ * Encode the durable part of a released provider revision.
+ * @param revision - provider revision for one stored log.
+ * @param sizeBytes - stored log length reported beside the revision.
+ * @returns a fingerprint comparable across processes, or undefined when the revision is unrecognized.
+ * A revision is device, inode, size, and nanosecond mtime and ctime, optionally followed by a
+ * process-scoped digest. Only the leading durable components are kept, so both a revision with that
+ * digest and one without it produce a comparable fingerprint.
+ */
+function durableFingerprint(revision: string|undefined, sizeBytes: number|undefined): WorkerSourceFingerprint|undefined {
+  if(revision===undefined)return undefined
+  const parts=revision.split(':')
+  if(parts.length<5)return undefined
+  const durable=parts.slice(0,5)
+  if(!durable.every(part=>/^[0-9]+$/.test(part)))return undefined
+  if(sizeBytes!==undefined && Number(durable[2])!==sizeBytes)return undefined
+  return workerSourceFingerprint(JSON.stringify({artifact:durable}))
 }
 
 /**
@@ -96,26 +91,17 @@ function sourceIdentity(config: ReturnType<typeof resolveOptions>, providerVersi
  * @param request - stored lifecycle and whether this is a mid-pass lookup or a post-EOF verification.
  * @param signal - optional cancellation.
  * @returns a durable fingerprint; missing or unmaterialized sessions provide no reusable checkpoint.
- * Current logs use their physical revision; historical projections use the freshly observed corpus.
+ * A single session is observed through its own stored revision, which is the durable value the
+ * listing reports for the same log.
  */
 export const getSourceStamp: NonNullable<WorkerReaderModule['getSourceStamp']> = async (options,request,signal) => {
   signal?.throwIfAborted()
   const {provider,SessionId,config,providerVersion}=await openProvider(options)
-  {
-    const id=SessionId(request.session.id)
-    const snapshot=await provider.stat(id,{signal})
-    if(snapshot===undefined || snapshot.header.createdAt!==request.session.createdAt)return undefined
-    const source=sourceIdentity(config,providerVersion)
-    const current=await provider.resolveCurrentLog(id,signal)
-    if(current!==undefined) {
-      const observation=await physicalObservation(current,config.root)
-      return {source,fingerprint:workerSourceFingerprint(createHash('sha256').update(JSON.stringify({current:observation})).digest('hex'))}
-    }
-    // Historical projections also depend on sibling generations, so the selected corpus is
-    // observed fresh: a digest taken at listing time can predate a change made during the pass.
-    const corpus=await corpusFingerprint(config.root,config.compression,signal)
-    return {source,fingerprint:workerSourceFingerprint('historical:'+corpus)}
-  }
+  const snapshot=await provider.stat(SessionId(request.session.id),{signal})
+  if(snapshot===undefined || snapshot.header.createdAt!==request.session.createdAt)return undefined
+  const fingerprint=durableFingerprint(snapshot.revision,snapshot.sizeBytes)
+  if(fingerprint===undefined)return undefined
+  return {source:sourceIdentity(config,providerVersion),fingerprint}
 }
 
 /**
@@ -123,18 +109,26 @@ export const getSourceStamp: NonNullable<WorkerReaderModule['getSourceStamp']> =
  * @param options - provider file URL, root, and physical encoding from the Host.
  * @param request - creation-time window used for recent-first replay.
  * @param signal - optional cancellation.
- * @returns headers without event bodies; the public list API materializes metadata in the worker.
+ * @returns headers without event bodies, each carrying the durable fingerprint of its stored log.
+ * One list call reports every selected session, so discovery never observes sessions one by one.
  */
 export const listSessionHeaders: NonNullable<WorkerReaderModule['listSessionHeaders']> = async function* (options,request,signal) {
   signal?.throwIfAborted()
-  const {provider}=await openProvider(options)
-  {
-    const snapshots=await provider.list({signal})
-    for(const {header} of snapshots) {
-      signal?.throwIfAborted()
-      if(request.createdAtAfter !== undefined && header.createdAt < request.createdAtAfter)continue
-      if(request.createdAtBefore !== undefined && header.createdAt >= request.createdAtBefore)continue
-      yield {id:header.id,createdAt:header.createdAt,...(header.cwd===undefined?{}:{cwd:header.cwd})}
+  const {provider,config,providerVersion}=await openProvider(options)
+  const source=sourceIdentity(config,providerVersion)
+  const snapshots=await provider.list({signal})
+  for(const snapshot of snapshots) {
+    signal?.throwIfAborted()
+    const {header}=snapshot
+    if(request.createdAtAfter !== undefined && header.createdAt < request.createdAtAfter)continue
+    if(request.createdAtBefore !== undefined && header.createdAt >= request.createdAtBefore)continue
+    const fingerprint=durableFingerprint(snapshot.revision,snapshot.sizeBytes)
+    yield {
+      id:header.id,
+      createdAt:header.createdAt,
+      ...(header.cwd===undefined?{}:{cwd:header.cwd}),
+      source,
+      ...(fingerprint===undefined?{}:{fingerprint}),
     }
   }
 }

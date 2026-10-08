@@ -30,7 +30,9 @@ async function probeLines(temporary: string): Promise<readonly ProbeLine[]> {
 }
 
 async function waitForHistory(ctx: Context, sessions: number, reusedSessions = 0): Promise<void> {
-  const deadline=Date.now()+5000
+  // This drives a real provider and worker subprocess, so it needs headroom when the suite runs
+  // its files in parallel; a fixed short budget makes the pass look stuck under load.
+  const deadline=Date.now()+30_000
   while(Date.now()<deadline) {
     const status=ctx.usageLedger.statusSnapshot()
     if(status.lastError !== undefined) throw new Error(status.lastError)

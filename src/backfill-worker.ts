@@ -180,6 +180,7 @@ function asWorkerSession(entry: WorkerListedSession): WorkerSession {
     createdAt: entry.createdAt,
     ...(entry.cwd === undefined ? {} : { cwd: entry.cwd }),
     inheritedEventCount: 0,
+    ...(entry.source === undefined || entry.fingerprint === undefined ? {} : { stamp: { source: entry.source, fingerprint: entry.fingerprint } }),
   }
 }
 
@@ -192,6 +193,7 @@ function sessionHeaderLister(): NonNullable<WorkerReaderModule['listSessionHeade
 
 /** Discover source changes once; only unmatched durable EOF proofs become replay tasks. */
 async function* historySessions(): AsyncGenerator<WorkerSession> {
+  // One header enumeration carries each source fingerprint, so discovery never stats per session.
   if (init === undefined) return
   const cutoff=Date.now()-init.config.backfillDays*24*60*60*1000
   const lister=sessionHeaderLister()
@@ -232,14 +234,9 @@ async function prepareHistory(): Promise<void> {
     await waitForHistoryPermit()
     if(stopped)return
     discoveredSessions+=1
-    let unchanged=false
-    try {
-      const stamp=await reader.getSourceStamp?.(init?.readerSpec?.options,{session,phase:'lookup'})
-      unchanged=stamp!==undefined && !liveEvents.has(session.id) && requireDatabase().sourceUnchangedAtSavedCursor(session,stamp)
-    } catch (error: unknown) {
-      // A failed metadata check is not an EOF proof; queue the source so normal replay can retry and report it.
-      unchanged=false
-    }
+    const stamp=session.stamp
+    // A listing fingerprint without a stored cursor is not an EOF proof; such a source is queued.
+    const unchanged=stamp!==undefined && !liveEvents.has(session.id) && requireDatabase().sourceUnchangedAtSavedCursor(session,stamp)
     if(unchanged)reusedSessions+=1
     else {
       pending.push(session)
@@ -350,8 +347,10 @@ async function processSession(task: SessionTask): Promise<boolean> {
     return false
   }
   if (reader === undefined) return false
-  const before = await reader.getSourceStamp?.(init.readerSpec?.options, { session, phase: 'lookup' })
-  if (before !== undefined && requireDatabase().sourceUnchanged(session,before,reducer.resumeSeq(session)-1)) {
+  // Reuse needs the cursor stored by this connection, so a pre-queue listing fingerprint cannot
+  // authorize it. Readers without listing fingerprints are observed here instead.
+  const observed = session.stamp ?? await reader.getSourceStamp?.(init.readerSpec?.options, { session, phase: 'lookup' })
+  if (observed !== undefined && requireDatabase().sourceUnchanged(session,observed,reducer.resumeSeq(session)-1)) {
     return true
   }
   const batches = reader.readSessionBatches(
@@ -380,11 +379,12 @@ async function processSession(task: SessionTask): Promise<boolean> {
     sliceStarted = performance.now()
   }
   if (stopped) return false
-  if (before !== undefined) {
-    const after = await reader.getSourceStamp?.(init.readerSpec?.options,{session,phase:'verify'})
-    if(after?.source===before.source && after.fingerprint===before.fingerprint) {
-      requireDatabase().completeSource(session,after,reducer.resumeSeq(session)-1)
-    }
+  // Record EOF only from a fresh observation of this session, so a source that changed during the
+  // pass is not marked complete by the listing fingerprint taken before it.
+  const after = await reader.getSourceStamp?.(init.readerSpec?.options,{session,phase:'verify'})
+  // A source that moved during the pass is not complete: only a matching fresh observation is stored.
+  if(observed!==undefined && after!==undefined && after.source===observed.source && after.fingerprint===observed.fingerprint) {
+    requireDatabase().completeSource(session,after,reducer.resumeSeq(session)-1)
   }
   return true
 }

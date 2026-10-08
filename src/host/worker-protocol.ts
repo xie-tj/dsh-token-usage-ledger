@@ -62,6 +62,10 @@ export interface WorkerListedSession {
   readonly id: string
   readonly createdAt: number
   readonly cwd?: string
+  /** Source identity shared by every session listed for one reader configuration. */
+  readonly source?: WorkerSourceIdentity
+  /** Durable fingerprint of the stored log, absent when the provider revision is unrecognized. */
+  readonly fingerprint?: WorkerSourceFingerprint
 }
 
 /** Compact session identity sent over IPC. */
@@ -70,6 +74,8 @@ export interface WorkerSession {
   readonly createdAt: number
   readonly cwd?: string
   readonly inheritedEventCount: number
+  /** Listing-carried source proof used only for pre-queue filtering, never for reuse. */
+  readonly stamp?: WorkerSourceStamp
 }
 
 export interface WorkerInitFrame {

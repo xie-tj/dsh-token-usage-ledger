@@ -5,7 +5,8 @@ import { type WorkerReaderModule } from './host/worker-protocol.js';
  * @param request - stored lifecycle and whether this is a mid-pass lookup or a post-EOF verification.
  * @param signal - optional cancellation.
  * @returns a durable fingerprint; missing or unmaterialized sessions provide no reusable checkpoint.
- * Current logs use their physical revision; historical projections use the freshly observed corpus.
+ * A single session is observed through its own stored revision, which is the durable value the
+ * listing reports for the same log.
  */
 export declare const getSourceStamp: NonNullable<WorkerReaderModule['getSourceStamp']>;
 /**
@@ -13,7 +14,8 @@ export declare const getSourceStamp: NonNullable<WorkerReaderModule['getSourceSt
  * @param options - provider file URL, root, and physical encoding from the Host.
  * @param request - creation-time window used for recent-first replay.
  * @param signal - optional cancellation.
- * @returns headers without event bodies; the public list API materializes metadata in the worker.
+ * @returns headers without event bodies, each carrying the durable fingerprint of its stored log.
+ * One list call reports every selected session, so discovery never observes sessions one by one.
  */
 export declare const listSessionHeaders: NonNullable<WorkerReaderModule['listSessionHeaders']>;
 /**
