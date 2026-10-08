@@ -33,7 +33,7 @@ function interpolate(template: string, values: Record<string, string>): string {
  * @returns a status card; progress measures completed sessions, not tokens or time.
  */
 export function UsageBackfillStatus({ status, stale, t }: Props) {
-  const knownTotal = status !== undefined && status.totalSessions > 0
+  const knownTotal = status !== undefined && (status.totalSessions > 0 || status.historyComplete === true)
   const phase: Phase = status === undefined
     ? stale ? 'unavailable' : 'loading'
     : status.lastError !== undefined || status.state === 'failed'
@@ -46,7 +46,7 @@ export function UsageBackfillStatus({ status, stale, t }: Props) {
             ? knownTotal && status.processedSessions > 0 ? 'incomplete' : 'waiting'
             : status.state
   const percent = knownTotal
-    ? Math.min(100, Math.max(0, Math.round(status.processedSessions / status.totalSessions * 1000) / 10))
+    ? status.totalSessions === 0 ? 100 : Math.min(100, Math.max(0, Math.round(status.processedSessions / status.totalSessions * 1000) / 10))
     : undefined
   const number = (value: number) => new Intl.NumberFormat().format(value)
   const sessions = status === undefined ? '—' : number(status.processedSessions) + ' / ' + (knownTotal ? number(status.totalSessions) : '—')

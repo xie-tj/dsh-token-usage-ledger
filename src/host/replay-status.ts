@@ -9,7 +9,7 @@ import type { UsageLedgerStatus } from './types.ts'
  */
 export function replayStateAfterPace(status: UsageLedgerStatus, mode: 'run' | 'pause'): UsageLedgerStatus['state'] {
   if(status.lastError!==undefined || status.state==='failed')return status.state
-  const complete=status.totalSessions>0 && status.processedSessions>=status.totalSessions
+  const complete=status.historyComplete===true || status.totalSessions>0 && status.processedSessions>=status.totalSessions
   if(complete && (status.state==='idle' || status.state==='paused'))return 'idle'
   if(mode==='pause')return complete?status.state:'paused'
   return status.state==='paused'?'running':status.state

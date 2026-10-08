@@ -107,6 +107,8 @@ const dsh_plugin_usage_ledger_usageLedgerPlugin_status_result$schema = () => (ds
   'processedSessions': z.number().readonly(),
   'processedEvents': z.number().readonly(),
   'reusedSessions': z.union([z.undefined(), z.number()]).readonly().optional(),
+  'discoveredSessions': z.union([z.undefined(), z.number()]).readonly().optional(),
+  'historyComplete': z.union([z.undefined(), z.literal(false), z.literal(true)]).readonly().optional(),
   'failedSessions': z.union([z.undefined(), z.number()]).readonly().optional(),
   'backfillDays': z.number().readonly(),
   'backfillScope': z.union([z.literal("all"), z.literal("recent")]).readonly(),

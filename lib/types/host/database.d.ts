@@ -59,6 +59,16 @@ export declare class UsageLedgerDatabase {
         readonly createdAt: number;
     }, stamp: WorkerSourceStamp, observedSeq: number): boolean;
     /**
+     * Classify a source before creating a replay task or decoding cursor state.
+     * @param session - stored lifecycle identity.
+     * @param stamp - freshly observed source metadata.
+     * @returns true when the EOF proof matches both the source and the cursor currently on disk.
+     */
+    sourceUnchangedAtSavedCursor(session: {
+        readonly id: string;
+        readonly createdAt: number;
+    }, stamp: WorkerSourceStamp): boolean;
+    /**
      * Save EOF only for the cursor that is still stored by this connection.
      * @param session - stored lifecycle identity.
      * @param stamp - stable observation verified after the reader finishes.

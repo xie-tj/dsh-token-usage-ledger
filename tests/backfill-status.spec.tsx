@@ -153,8 +153,18 @@ describe('Background accounting presentation', () => {
   it('explains restored results without treating the current-run event count as a lost ledger', async () => {
     const view=await mount({...progress,state:'idle',processedSessions:4,processedEvents:0,reusedSessions:4})
     const panel=view.querySelector('[role="region"]')
-    expect(panel?.textContent).toContain('已复用 4 个未变会话的持久化结果')
+    expect(panel?.textContent).toContain('已从持久化检查点跳过 4 个未变会话')
     expect(panel?.textContent).toContain('本轮处理事件')
+  })
+
+  it('shows a persisted all-reused history as complete with zero queued sessions', async () => {
+    const view=await mount({...progress,state:'idle',historyComplete:true,discoveredSessions:200,totalSessions:0,processedSessions:0,processedEvents:0,reusedSessions:200})
+    const panel=view.querySelector('[role="region"]')
+    expect(panel?.textContent).toContain('历史统计已完成')
+    expect(panel?.textContent).toContain('0 / 0')
+    expect(panel?.textContent).toContain('跳过 200 个未变会话')
+    expect(panel?.textContent).not.toContain('尚未开始')
+    expect(panel?.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('100')
   })
 
   it('shows an unavailable state instead of making up progress', async () => {
@@ -168,7 +178,7 @@ describe('Background accounting presentation', () => {
     const view = await mount(progress,{english:true})
     const panel=view.querySelector('[role="region"][aria-label="Background accounting"]')
     expect(panel?.textContent).toContain('Running')
-    expect(panel?.textContent).toContain('Sessions checked')
+    expect(panel?.textContent).toContain('Sessions scanned this run')
     expect(panel?.textContent).toContain('Events processed this run')
     expect(panel?.querySelector('[role="progressbar"]')?.getAttribute('aria-label')).toBe('Session scan progress')
   })

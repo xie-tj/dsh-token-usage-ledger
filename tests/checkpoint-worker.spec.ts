@@ -35,7 +35,7 @@ async function scenario(options:{drift:boolean;interrupt:boolean}) {
     if(drift)fingerprint='after'
     drift=false;interrupt=false
     await start()
-    await waitFor(()=>ctx.usageLedger.statusSnapshot().state==='idle'&&ctx.usageLedger.statusSnapshot().processedSessions===1)
+    await waitFor(()=>ctx.usageLedger.statusSnapshot().state==='idle'&&ctx.usageLedger.statusSnapshot().historyComplete===true)
     const reads=(await readFile(probe,'utf8')).trim()
     const snapshot=await ctx.usageLedger.snapshot({all:true,timeZone:'UTC'})
     expect(snapshot.models).toMatchObject([{requests:1,inputTokens:2,outputTokens:1}])

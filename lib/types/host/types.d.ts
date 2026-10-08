@@ -136,14 +136,18 @@ export type UsageLedgerWorkerState = 'idle' | 'running' | 'paused' | 'failed';
 export interface UsageLedgerStatus {
     /** Current worker state; `paused` means historical replay is unsupported/off. */
     readonly state: UsageLedgerWorkerState;
-    /** Number of sessions selected for the current automatic backfill pass. */
+    /** Changed, new, or unverified sessions queued for the current replay pass; excludes reused EOF proofs. */
     readonly totalSessions: number;
-    /** Sessions whose reader pass has completed. */
+    /** Queued sessions that reached EOF during this pass, counted once per lifecycle. */
     readonly processedSessions: number;
     /** Logical events observed by the worker. */
     readonly processedEvents: number;
     /** Historical sessions restored from unchanged source checkpoints during this run. */
     readonly reusedSessions?: number;
+    /** Total selected headers observed during change discovery, including reused sessions. */
+    readonly discoveredSessions?: number;
+    /** Discovery and all selected incremental work finished, including a zero-work pass. */
+    readonly historyComplete?: boolean;
     /** Selected historical lifecycles still awaiting a successful re-read. */
     readonly failedSessions?: number;
     /** Automatic historical window in days. */

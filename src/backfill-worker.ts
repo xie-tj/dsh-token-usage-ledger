@@ -49,6 +49,9 @@ let processedSessions = 0
 let processedEvents = 0
 let reusedSessions = 0
 let totalSessions = 0
+let discoveredSessions = 0
+let historyPrepared = false
+const historyOutstanding = new Map<string, number>()
 let lastProgressAt = 0
 let pace: { mode: 'run' | 'pause'; delayMs: number } = { mode: 'run', delayMs: 0 }
 let wake: (() => void) | undefined
@@ -143,6 +146,8 @@ function markProgress(
     processedSessions,
     processedEvents,
     reusedSessions,
+    discoveredSessions,
+    historyComplete: historyPrepared && historyDone && processedSessions >= totalSessions && unresolvedFailures.size === 0,
     failedSessions: unresolvedFailures.size,
     ...(currentSessionId === undefined ? {} : { currentSessionId }),
     backfillDays: init?.config.backfillDays ?? 0,
@@ -185,44 +190,27 @@ function sessionHeaderLister(): NonNullable<WorkerReaderModule['listSessionHeade
     : undefined
 }
 
-async function countHistory(): Promise<number> {
-  const lister = sessionHeaderLister()
-  if (lister === undefined || init === undefined) return init?.sessions.length ?? 0
-  const cutoff = Date.now() - init.config.backfillDays * 24 * 60 * 60 * 1000
-  let count = 0
-  for await (const session of lister(init.readerSpec?.options, {
-    ...(init.config.backfillScope === 'recent' ? { createdAtAfter: cutoff } : {}),
-  })) {
-    await waitForHistoryPermit()
-    if (stopped) return count
-    if (init.config.backfillScope === 'all' || session.createdAt >= cutoff) count += 1
-  }
-  return count
-}
-
+/** Discover source changes once; only unmatched durable EOF proofs become replay tasks. */
 async function* historySessions(): AsyncGenerator<WorkerSession> {
   if (init === undefined) return
-  const lister = sessionHeaderLister()
-  if (lister === undefined) {
-    const cutoff = Date.now() - init.config.backfillDays * 24 * 60 * 60 * 1000
-    const selected = init.sessions
-      .filter(session => init?.config.backfillScope === 'all' || session.createdAt >= cutoff)
-      .sort((left, right) => right.createdAt - left.createdAt)
-    yield* selected
+  const cutoff=Date.now()-init.config.backfillDays*24*60*60*1000
+  const lister=sessionHeaderLister()
+  if(lister===undefined) {
+    for(const session of init.sessions)if(init.config.backfillScope==='all'||session.createdAt>=cutoff)yield session
     return
   }
-  const cutoff = Date.now() - init.config.backfillDays * 24 * 60 * 60 * 1000
-  for await (const session of lister(init.readerSpec?.options, { createdAtAfter: cutoff })) {
+  for await(const entry of lister(init.readerSpec?.options,{
+    ...(init.config.backfillScope==='recent'?{createdAtAfter:cutoff}:{}),
+  })) {
     await waitForHistoryPermit()
-    if (stopped) return
-    yield asWorkerSession(session)
+    if(stopped)return
+    if(init.config.backfillScope==='recent'&&entry.createdAt<cutoff)continue
+    yield asWorkerSession(entry)
   }
-  if (init.config.backfillScope === 'recent') return
-  for await (const session of lister(init.readerSpec?.options, { createdAtBefore: cutoff })) {
-    await waitForHistoryPermit()
-    if (stopped) return
-    yield asWorkerSession(session)
-  }
+}
+
+async function* plannedHistory(sessions: readonly WorkerSession[]): AsyncGenerator<WorkerSession> {
+  yield* sessions
 }
 
 async function prepareHistory(): Promise<void> {
@@ -238,8 +226,34 @@ async function prepareHistory(): Promise<void> {
     historyDone = true
     return
   }
-  totalSessions = await countHistory()
-  history = historySessions()
+  await markProgress('running')
+  const pending: WorkerSession[]=[]
+  for await(const session of historySessions()) {
+    await waitForHistoryPermit()
+    if(stopped)return
+    discoveredSessions+=1
+    let unchanged=false
+    try {
+      const stamp=await reader.getSourceStamp?.(init?.readerSpec?.options,{session,phase:'lookup'})
+      unchanged=stamp!==undefined && !liveEvents.has(session.id) && requireDatabase().sourceUnchangedAtSavedCursor(session,stamp)
+    } catch (error: unknown) {
+      // A failed metadata check is not an EOF proof; queue the source so normal replay can retry and report it.
+      unchanged=false
+    }
+    if(unchanged)reusedSessions+=1
+    else {
+      pending.push(session)
+      historyOutstanding.set(session.id,session.createdAt)
+    }
+    if (performance.now() - lastProgressAt > 500) {
+      lastProgressAt = performance.now()
+      await markProgress('running')
+    }
+  }
+  pending.sort((left,right)=>right.createdAt-left.createdAt)
+  totalSessions=pending.length
+  history=plannedHistory(pending)
+  historyPrepared=true
 }
 
 async function takeNextTask(): Promise<SessionTask | undefined> {
@@ -338,7 +352,6 @@ async function processSession(task: SessionTask): Promise<boolean> {
   if (reader === undefined) return false
   const before = await reader.getSourceStamp?.(init.readerSpec?.options, { session, phase: 'lookup' })
   if (before !== undefined && requireDatabase().sourceUnchanged(session,before,reducer.resumeSeq(session)-1)) {
-    if(task.countHistory===true)reusedSessions+=1
     return true
   }
   const batches = reader.readSessionBatches(
@@ -386,9 +399,12 @@ async function pump(): Promise<void> {
       try {
         await markProgress('running', task.session.id)
         const completed = await processSession(task)
-        if (completed) {
+        if (completed && task.kind !== 'live') {
           unresolvedFailures.delete(task.session.id)
-          if (task.countHistory === true) processedSessions += 1
+          if (historyOutstanding.get(task.session.id) === task.session.createdAt) {
+            historyOutstanding.delete(task.session.id)
+            processedSessions += 1
+          }
         }
       } catch (error: unknown) {
         const message = errorMessage(error)

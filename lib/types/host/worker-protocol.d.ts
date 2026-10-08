@@ -117,6 +117,8 @@ export interface WorkerProgressFrame {
     readonly processedSessions: number;
     readonly processedEvents: number;
     readonly reusedSessions?: number;
+    readonly discoveredSessions?: number;
+    readonly historyComplete?: boolean;
     /** Selected historical lifecycles that still need a successful re-read. */
     readonly failedSessions?: number;
     readonly currentSessionId?: string;

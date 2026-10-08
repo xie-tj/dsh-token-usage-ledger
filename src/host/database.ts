@@ -326,6 +326,22 @@ export class UsageLedgerDatabase {
   }
 
   /**
+   * Classify a source before creating a replay task or decoding cursor state.
+   * @param session - stored lifecycle identity.
+   * @param stamp - freshly observed source metadata.
+   * @returns true when the EOF proof matches both the source and the cursor currently on disk.
+   */
+  sourceUnchangedAtSavedCursor(session: {readonly id:string;readonly createdAt:number}, stamp: WorkerSourceStamp): boolean {
+    const row=this.db.prepare(`
+      SELECT c.fingerprint FROM source_checkpoints AS c
+      LEFT JOIN sessions AS s ON s.session_id=c.session_id AND s.created_at=c.created_at
+      WHERE c.source=? AND c.session_id=? AND c.created_at=?
+        AND c.observed_seq=COALESCE(s.observed_seq,-1)
+    `).get(stamp.source,session.id,session.createdAt) as {fingerprint:string}|undefined
+    return row?.fingerprint===stamp.fingerprint
+  }
+
+  /**
    * Save EOF only for the cursor that is still stored by this connection.
    * @param session - stored lifecycle identity.
    * @param stamp - stable observation verified after the reader finishes.

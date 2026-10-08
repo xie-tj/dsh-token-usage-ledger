@@ -17,6 +17,11 @@ export default class ObservedJsonlPersistence extends JsonlPersistence {
     return join(dirname(this.config.root), 'log-opens.ndjson')
   }
 
+  async list(options) {
+    await appendFile(this.probe(),JSON.stringify({kind:'list'})+NEWLINE)
+    return super.list(options)
+  }
+
   async open(id, access, options) {
     await appendFile(this.probe(), JSON.stringify({kind:'open',id,access})+NEWLINE)
     return super.open(id,access,options)
