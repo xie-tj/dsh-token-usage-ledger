@@ -57,13 +57,20 @@ async function openProvider(options: Options): Promise<OpenedProvider> {
 
 /**
 /**
+ * Checkpoint identity for the released JSONL adapter.
+ * Changing this string invalidates every stored checkpoint and forces one full re-verification of
+ * all history, so it must only change when the fingerprint encoding itself becomes incompatible.
+ */
+const SOURCE_READER_ID='released-jsonl-checkpoint-v2'
+
+/**
  * Identify the reader configuration and released provider version that produced a fingerprint.
  * @param config - validated reader options.
  * @param providerVersion - installed released provider version.
  * @returns an opaque identity; it excludes the plugin install path and plugin version.
  */
 function sourceIdentity(config: ReturnType<typeof resolveOptions>, providerVersion: string) {
-  return workerSourceIdentity(JSON.stringify({reader:'released-jsonl-checkpoint-v2',root:config.root,compression:config.compression,providerVersion}))
+  return workerSourceIdentity(JSON.stringify({reader:SOURCE_READER_ID,root:config.root,compression:config.compression,providerVersion}))
 }
 
 /**

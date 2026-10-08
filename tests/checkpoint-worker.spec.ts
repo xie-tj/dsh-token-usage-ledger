@@ -44,6 +44,14 @@ async function scenario(options:{drift:boolean;interrupt:boolean}) {
 }
 
 describe('Completed-source checkpoint ownership',()=>{
+  it('keeps one stable checkpoint identity so an update never invalidates stored proofs',async()=>{
+    // A change here silently invalidates every stored checkpoint and re-reads all history after an
+    // update, so the shipped worker bundle is asserted rather than a private constant.
+    const bundle=await readFile(new URL('../lib/jsonl-reader.js',import.meta.url),'utf8')
+    const identities=[...bundle.matchAll(/released-jsonl-checkpoint-v\d+/g)].map(match=>match[0])
+    expect(new Set(identities)).toEqual(new Set(['released-jsonl-checkpoint-v2']))
+  })
+
   it('reuses only a stable source that reached EOF',async()=>{expect(await scenario({drift:false,interrupt:false})).toBe('')})
   it('reopens a source that changed during its completed replay',async()=>{expect(await scenario({drift:true,interrupt:false})).not.toBe('')})
   it('does not mark a partial failed replay as complete',async()=>{expect(await scenario({drift:false,interrupt:true})).not.toBe('')})
