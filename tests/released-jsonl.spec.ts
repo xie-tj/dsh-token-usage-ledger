@@ -22,6 +22,13 @@ async function logBytes(root: string): Promise<Map<string, Buffer>> {
   return result
 }
 
+interface ProbeLine { readonly kind: 'construct' | 'open'; readonly id?: string }
+
+async function probeLines(temporary: string): Promise<readonly ProbeLine[]> {
+  const text = await readFile(join(temporary, 'log-opens.ndjson'), 'utf8')
+  return text.split('\n').filter(line => line !== '').map(line => JSON.parse(line) as ProbeLine)
+}
+
 async function waitForHistory(ctx: Context, sessions: number): Promise<void> {
   const deadline=Date.now()+5000
   while(Date.now()<deadline) {
@@ -104,7 +111,9 @@ describe('Released JSONL persistence compatibility', () => {
       const resumed=await ctx.usageLedger.snapshot({all:true,timeZone:'UTC'})
       expect(resumed.models).toEqual(snapshot.models)
       expect(await logBytes(root)).toEqual(before)
-      expect(await readFile(join(temporary,'log-opens.ndjson'),'utf8'), 'unchanged logs should not be decoded after a plugin restart').toBe('')
+      const resumedProbe=await probeLines(temporary)
+      expect(resumedProbe.filter(line=>line.kind==='open'), 'unchanged logs should not be decoded after a plugin restart').toEqual([])
+      expect(resumedProbe.filter(line=>line.kind==='construct').length, 'one provider instance serves the whole pass instead of one per session').toBeLessThanOrEqual(2)
       expect(ctx.usageLedger.statusSnapshot()).toMatchObject({reusedSessions:2,processedEvents:0})
 
       await ledger.dispose()
@@ -117,7 +126,7 @@ describe('Released JSONL persistence compatibility', () => {
       ledger=ctx.plugin(Ledger,{databasePath:join(temporary,'ledger.sqlite'),backfillPowerMode:'always',backfillPauseRssMiB:1048576})
       await ledger.await()
       await waitForHistory(ctx,2)
-      const changed=(await readFile(join(temporary,'log-opens.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line).id)
+      const changed=(await probeLines(temporary)).filter(line=>line.kind==='open').map(line=>line.id)
       expect(changed).toEqual(['recent'])
       expect(ctx.usageLedger.statusSnapshot()).toMatchObject({reusedSessions:1,processedEvents:1})
       expect((await ctx.usageLedger.snapshot({all:true,timeZone:'UTC'})).models).toEqual(snapshot.models)
@@ -129,7 +138,7 @@ describe('Released JSONL persistence compatibility', () => {
       ledger=ctx.plugin(Ledger,{databasePath:join(temporary,'ledger.sqlite'),backfillPowerMode:'always',backfillPauseRssMiB:1048576})
       await ledger.await()
       await waitForHistory(ctx,3)
-      const added=(await readFile(join(temporary,'log-opens.ndjson'),'utf8')).trim().split('\n').map(line=>JSON.parse(line).id)
+      const added=(await probeLines(temporary)).filter(line=>line.kind==='open').map(line=>line.id)
       expect(added).toEqual(['new'])
       expect(ctx.usageLedger.statusSnapshot()).toMatchObject({reusedSessions:2})
     } finally {

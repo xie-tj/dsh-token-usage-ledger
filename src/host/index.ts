@@ -606,6 +606,8 @@ export class UsageLedgerService extends TypertRemoteService {
   private lastPowerProbe = 0
   private powerProbe: Promise<void> | undefined
   private pace: UsageLedgerPace | undefined
+  /** Which owner produced the retained error, so only a matching resolution clears it. */
+  private failureOwner: 'session' | 'worker' | undefined
   private status: UsageLedgerStatus
 
   constructor(ctx: Context, config: Config = {}) {
@@ -825,23 +827,31 @@ export class UsageLedgerService extends TypertRemoteService {
 
   private handleWorkerResponse(frame: WorkerResponseFrame): void {
     switch (frame.type) {
-      case 'progress':
+      case 'progress': {
+        const failedSessions = frame.failedSessions ?? 0
+        // Only the worker's own zero-failure report resolves a session error; transport and
+        // initialization failures stay until a healthy worker proves they are gone.
+        const resolved = failedSessions === 0 && this.failureOwner === 'session'
+        if (resolved) this.failureOwner = undefined
         this.status = {
           ...this.status,
-          state: frame.status,
+          state: !resolved && failedSessions > 0 && frame.status !== 'running' ? 'failed' : frame.status,
           totalSessions: frame.totalSessions,
           processedSessions: frame.processedSessions,
           processedEvents: frame.processedEvents,
           reusedSessions: frame.reusedSessions ?? 0,
+          failedSessions,
           updatedAt: new Date().toISOString(),
+          ...(resolved ? { lastError: undefined } : {}),
           ...(frame.currentSessionId === undefined ? { currentSessionId: undefined } : { currentSessionId: frame.currentSessionId }),
         }
         return
+      }
       case 'checkpoint':
       case 'done':
         return
       case 'error':
-        this.recordFailure(frame.sessionId === undefined ? frame.message : 'session ' + frame.sessionId + ': ' + frame.message)
+        this.recordFailure(frame.sessionId === undefined ? frame.message : 'session ' + frame.sessionId + ': ' + frame.message, frame.sessionId === undefined ? 'worker' : 'session')
         return
     }
   }
@@ -903,7 +913,8 @@ export class UsageLedgerService extends TypertRemoteService {
     }
   }
 
-  private recordFailure(message: string): void {
+  private recordFailure(message: string, owner: 'session' | 'worker' = 'worker'): void {
+    this.failureOwner = owner
     this.status = { ...this.status, state: 'failed', lastError: message, updatedAt: new Date().toISOString() }
     this.ctx.logger.warn('usage ledger: ' + message)
   }

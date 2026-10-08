@@ -40,6 +40,9 @@ let historyDone = false
 const priority = new Map<string, SessionTask>()
 const deferredRescans = new Map<string, SessionTask>()
 const liveEvents = new Map<string, Map<number, UsageSessionEvent>>()
+// Unresolved per-lifecycle read failures; an entry is cleared only by that session reaching EOF.
+const unresolvedFailures = new Map<string, string>()
+const retriedSessions = new Set<string>()
 let pumping = false
 let outputChain = Promise.resolve()
 let processedSessions = 0
@@ -83,6 +86,18 @@ async function waitForHistoryPermit(): Promise<void> {
   while (!stopped && historyPaused()) await waitForWake()
 }
 
+/** Queue one priority task without dropping a preempted history item's completion marker. */
+function queuePriority(task: SessionTask): void {
+  const previous = priority.get(task.session.id)
+  priority.set(task.session.id, previous?.countHistory === true && task.countHistory !== true ? { ...task, countHistory: true } : task)
+}
+
+/** Defer one task for resumed pacing, keeping the same completion marker. */
+function queueDeferred(task: SessionTask): void {
+  const previous = deferredRescans.get(task.session.id)
+  deferredRescans.set(task.session.id, previous?.countHistory === true && task.countHistory !== true ? { ...task, countHistory: true } : task)
+}
+
 function queueLive(session: WorkerSession, event: UsageSessionEvent): void {
   const bySeq = liveEvents.get(session.id) ?? new Map<number, UsageSessionEvent>()
   bySeq.set(event.seq, event)
@@ -93,23 +108,23 @@ function queueLive(session: WorkerSession, event: UsageSessionEvent): void {
     if (oldest !== undefined) bySeq.delete(oldest)
   }
   liveEvents.set(session.id, bySeq)
-  priority.set(session.id, { session, kind: 'live' })
+  queuePriority({ session, kind: 'live' })
   notifyWake()
 }
 
 function queueRescan(session: WorkerSession): void {
   const task: SessionTask = { session, kind: 'rescan' }
   if (pace.mode === 'pause') {
-    deferredRescans.set(session.id, task)
+    queueDeferred(task)
   } else {
-    priority.set(session.id, task)
+    queuePriority(task)
   }
   notifyWake()
 }
 
 function moveDeferredRescans(): void {
   if (pace.mode === 'pause') return
-  for (const task of deferredRescans.values()) priority.set(task.session.id, task)
+  for (const task of deferredRescans.values()) queuePriority(task)
   deferredRescans.clear()
 }
 
@@ -128,6 +143,7 @@ function markProgress(
     processedSessions,
     processedEvents,
     reusedSessions,
+    failedSessions: unresolvedFailures.size,
     ...(currentSessionId === undefined ? {} : { currentSessionId }),
     backfillDays: init?.config.backfillDays ?? 0,
   })
@@ -316,7 +332,7 @@ async function processSession(task: SessionTask): Promise<boolean> {
   await processLive(session, reducer)
   if (task.kind === 'live') return true
   if (pace.mode === 'pause') {
-    deferredRescans.set(session.id, task)
+    queueDeferred(task)
     return false
   }
   if (reader === undefined) return false
@@ -341,11 +357,11 @@ async function processSession(task: SessionTask): Promise<boolean> {
     await markProgress('running', session.id)
     await yieldForPace()
     if (historyPaused()) {
-      deferredRescans.set(session.id, task)
+      queueDeferred(task)
       return false
     }
     if (priority.size > 0) {
-      priority.set(session.id, { session, kind: 'rescan', countHistory: task.countHistory })
+      queuePriority({ session, kind: 'rescan', countHistory: task.countHistory })
       return false
     }
     sliceStarted = performance.now()
@@ -370,16 +386,28 @@ async function pump(): Promise<void> {
       try {
         await markProgress('running', task.session.id)
         const completed = await processSession(task)
-        if (completed && task.countHistory === true) processedSessions += 1
+        if (completed) {
+          unresolvedFailures.delete(task.session.id)
+          if (task.countHistory === true) processedSessions += 1
+        }
       } catch (error: unknown) {
-        await send({ type: 'error', message: errorMessage(error), sessionId: task.session.id })
+        const message = errorMessage(error)
+        // One bounded retry absorbs a transient read failure; a repeat stays unresolved so a
+        // later pass repairs it instead of the drain reporting a healthy idle ledger.
+        if (task.kind === 'history' && !retriedSessions.has(task.session.id)) {
+          retriedSessions.add(task.session.id)
+          queuePriority(task)
+        } else {
+          unresolvedFailures.set(task.session.id, message)
+        }
+        await send({ type: 'error', message, sessionId: task.session.id })
       }
       if (performance.now() - lastProgressAt > 500) {
         lastProgressAt = performance.now()
         await markProgress('running')
       }
     }
-    if (!stopped) await markProgress(pace.mode === 'pause' && !historyDone ? 'paused' : reader === undefined ? 'paused' : 'idle')
+    if (!stopped) await markProgress(unresolvedFailures.size > 0 ? 'failed' : pace.mode === 'pause' && !historyDone ? 'paused' : reader === undefined ? 'paused' : 'idle')
   } catch (error: unknown) {
     await send({ type: 'error', message: errorMessage(error), fatal: true })
     await markProgress('failed')

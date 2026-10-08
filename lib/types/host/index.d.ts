@@ -70,6 +70,8 @@ export declare class UsageLedgerService extends TypertRemoteService {
     private lastPowerProbe;
     private powerProbe;
     private pace;
+    /** Which owner produced the retained error, so only a matching resolution clears it. */
+    private failureOwner;
     private status;
     constructor(ctx: Context, config?: Config);
     /** Open only a bounded SQLite connection; no call rows enter the Host heap. */

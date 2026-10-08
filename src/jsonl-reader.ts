@@ -18,7 +18,7 @@ function resolveOptions(options: Options) {
   return {root:options.root,compression:options.compression,providerModule} as const
 }
 
-async function openProvider(options: Options) {
+async function createProvider(options: Options) {
   const config=resolveOptions(options)
   // Resolve peers beside the Host-selected provider, including app.asar deployments.
   const require=createRequire(config.providerModule)
@@ -33,9 +33,28 @@ async function openProvider(options: Options) {
   return {provider:ctx.sessionPersistence as InstanceType<typeof Jsonl>,fiber,SessionId,SessionPersistenceNotFoundError,config,providerVersion:packageJson.version}
 }
 
+type OpenedProvider = Awaited<ReturnType<typeof createProvider>>
 
-// Listing observations are owned by this worker's immutable reader options and released with them.
-const listingCorpus=new WeakMap<NonNullable<Options>, WorkerSourceStamp>()
+// Keyed by the worker's immutable reader options, which live until the worker exits.
+const providers = new WeakMap<NonNullable<Options>, Promise<OpenedProvider>>()
+
+/**
+ * Open the released provider once per reader options value.
+ * @param options - root, encoding, and selected provider module.
+ * @returns the shared provider instance.
+ * The released provider caches its root-encoding directory walk on the instance, so opening a
+ * provider per observed session would re-walk the whole session tree for every session. The
+ * instance is intentionally not disposed here: it is owned by the option value and the worker
+ * process reclaims it on exit. A failed open is not cached.
+ */
+async function openProvider(options: Options): Promise<OpenedProvider> {
+  if(options===undefined)return createProvider(options)
+  const cached=providers.get(options)
+  if(cached!==undefined)return cached
+  const pending=createProvider(options)
+  providers.set(options,pending)
+  try {return await pending} catch (error: unknown) {providers.delete(options);throw error}
+}
 
 async function physicalObservation(path: string, root: string): Promise<readonly string[]> {
   const value=await stat(path,{bigint:true})
@@ -74,15 +93,15 @@ function sourceIdentity(config: ReturnType<typeof resolveOptions>, providerVersi
 /**
  * Observe the JSONL inputs of a replay without decoding event bodies.
  * @param options - root, encoding, and selected provider module.
- * @param request - stored lifecycle and whether to reuse listing-time metadata or verify fresh EOF inputs.
+ * @param request - stored lifecycle and whether this is a mid-pass lookup or a post-EOF verification.
  * @param signal - optional cancellation.
  * @returns a durable fingerprint; missing or unmaterialized sessions provide no reusable checkpoint.
- * Current logs use their physical revision. Historical projections also depend on the selected corpus.
+ * Current logs use their physical revision; historical projections use the freshly observed corpus.
  */
 export const getSourceStamp: NonNullable<WorkerReaderModule['getSourceStamp']> = async (options,request,signal) => {
   signal?.throwIfAborted()
-  const {provider,fiber,SessionId,config,providerVersion}=await openProvider(options)
-  try {
+  const {provider,SessionId,config,providerVersion}=await openProvider(options)
+  {
     const id=SessionId(request.session.id)
     const snapshot=await provider.stat(id,{signal})
     if(snapshot===undefined || snapshot.header.createdAt!==request.session.createdAt)return undefined
@@ -92,11 +111,11 @@ export const getSourceStamp: NonNullable<WorkerReaderModule['getSourceStamp']> =
       const observation=await physicalObservation(current,config.root)
       return {source,fingerprint:workerSourceFingerprint(createHash('sha256').update(JSON.stringify({current:observation})).digest('hex'))}
     }
-    const listed=options===undefined?undefined:listingCorpus.get(options)
-    if(request.phase==='lookup' && listed?.source===source)return listed
+    // Historical projections also depend on sibling generations, so the selected corpus is
+    // observed fresh: a digest taken at listing time can predate a change made during the pass.
     const corpus=await corpusFingerprint(config.root,config.compression,signal)
     return {source,fingerprint:workerSourceFingerprint('historical:'+corpus)}
-  } finally {await fiber.dispose()}
+  }
 }
 
 /**
@@ -108,21 +127,16 @@ export const getSourceStamp: NonNullable<WorkerReaderModule['getSourceStamp']> =
  */
 export const listSessionHeaders: NonNullable<WorkerReaderModule['listSessionHeaders']> = async function* (options,request,signal) {
   signal?.throwIfAborted()
-  const {provider,fiber,config,providerVersion}=await openProvider(options)
-  try {
+  const {provider}=await openProvider(options)
+  {
     const snapshots=await provider.list({signal})
-    if(options!==undefined && snapshots.length>0) {
-      // Historical decoding may resolve other sessions; its reusable input is the selected corpus.
-      const corpus=await corpusFingerprint(config.root,config.compression,signal)
-      listingCorpus.set(options,{source:sourceIdentity(config,providerVersion),fingerprint:workerSourceFingerprint('historical:'+corpus)})
-    }
     for(const {header} of snapshots) {
       signal?.throwIfAborted()
       if(request.createdAtAfter !== undefined && header.createdAt < request.createdAtAfter)continue
       if(request.createdAtBefore !== undefined && header.createdAt >= request.createdAtBefore)continue
       yield {id:header.id,createdAt:header.createdAt,...(header.cwd===undefined?{}:{cwd:header.cwd})}
     }
-  } finally {await fiber.dispose()}
+  }
 }
 
 /**
@@ -131,14 +145,14 @@ export const listSessionHeaders: NonNullable<WorkerReaderModule['listSessionHead
  * @param request - session identity, persisted cursor, and maximum batch length.
  * @param signal - optional cancellation.
  * @returns current logical event batches with the provider-owned inherited prefix length.
- * The provider may decode a whole session while opening it; a fresh instance per session
- * prevents its decoded-log memo retaining previous sessions. No write handle is opened.
+ * The provider may decode a whole session while opening it; its decoded-log memo is bounded, and
+ * the instance is shared with the metadata observers above. No write handle is opened.
  */
 export const readSessionBatches: WorkerReaderModule['readSessionBatches'] = async function* (options,request,signal) {
   signal?.throwIfAborted()
   if (!Number.isSafeInteger(request.fromSeq) || request.fromSeq < 0) throw new TypeError('JSONL reader fromSeq must be nonnegative')
   if (!Number.isSafeInteger(request.batchEvents) || request.batchEvents < 1) throw new TypeError('JSONL reader batchEvents must be positive')
-  const {provider,fiber,SessionId,SessionPersistenceNotFoundError}=await openProvider(options)
+  const {provider,SessionId,SessionPersistenceNotFoundError}=await openProvider(options)
   let handle: SessionHandle | undefined
   try {
     try {
@@ -159,6 +173,6 @@ export const readSessionBatches: WorkerReaderModule['readSessionBatches'] = asyn
       if(events.length < request.batchEvents)break
     }
   } finally {
-    try {await handle?.close()} finally {await fiber.dispose()}
+    await handle?.close()
   }
 }

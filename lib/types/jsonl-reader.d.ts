@@ -2,10 +2,10 @@ import { type WorkerReaderModule } from './host/worker-protocol.js';
 /**
  * Observe the JSONL inputs of a replay without decoding event bodies.
  * @param options - root, encoding, and selected provider module.
- * @param request - stored lifecycle and whether to reuse listing-time metadata or verify fresh EOF inputs.
+ * @param request - stored lifecycle and whether this is a mid-pass lookup or a post-EOF verification.
  * @param signal - optional cancellation.
  * @returns a durable fingerprint; missing or unmaterialized sessions provide no reusable checkpoint.
- * Current logs use their physical revision. Historical projections also depend on the selected corpus.
+ * Current logs use their physical revision; historical projections use the freshly observed corpus.
  */
 export declare const getSourceStamp: NonNullable<WorkerReaderModule['getSourceStamp']>;
 /**
@@ -22,7 +22,7 @@ export declare const listSessionHeaders: NonNullable<WorkerReaderModule['listSes
  * @param request - session identity, persisted cursor, and maximum batch length.
  * @param signal - optional cancellation.
  * @returns current logical event batches with the provider-owned inherited prefix length.
- * The provider may decode a whole session while opening it; a fresh instance per session
- * prevents its decoded-log memo retaining previous sessions. No write handle is opened.
+ * The provider may decode a whole session while opening it; its decoded-log memo is bounded, and
+ * the instance is shared with the metadata observers above. No write handle is opened.
  */
 export declare const readSessionBatches: WorkerReaderModule['readSessionBatches'];

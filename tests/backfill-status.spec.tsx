@@ -78,6 +78,20 @@ describe('Background accounting presentation', () => {
     expect(view.querySelector('[role="region"]')?.textContent).not.toContain('恢复统计中')
   })
 
+  it('does not call partially scanned history unstarted when the worker reports idle', async () => {
+    const view=await mount({...progress,state:'idle',totalSessions:3127,processedSessions:1977,processedEvents:715421,reusedSessions:1})
+    const panel=view.querySelector('[role="region"]')
+    expect(panel?.textContent).not.toContain('尚未开始历史扫描')
+    expect(panel?.textContent).toContain('历史扫描未完成')
+  })
+
+  it('shows a retained reader error instead of an unstarted state after a partial scan', async () => {
+    const view=await mount({...progress,state:'idle',totalSessions:3127,processedSessions:1977,processedEvents:715421,lastError:'session example: stored log cannot be read'})
+    const panel=view.querySelector('[role="region"]')
+    expect(panel?.textContent).toContain('stored log cannot be read')
+    expect(panel?.textContent).not.toContain('尚未开始历史扫描')
+  })
+
   it('uses indeterminate progress until the worker has discovered the session count', async () => {
     const view = await mount({...progress,totalSessions:0,processedSessions:0,processedEvents:0})
     const panel = view.querySelector('[role="region"]')

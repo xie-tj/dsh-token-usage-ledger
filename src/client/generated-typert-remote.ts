@@ -107,6 +107,7 @@ const dsh_plugin_usage_ledger_usageLedgerPlugin_status_result$schema = () => (ds
   'processedSessions': z.number().readonly(),
   'processedEvents': z.number().readonly(),
   'reusedSessions': z.union([z.undefined(), z.number()]).readonly().optional(),
+  'failedSessions': z.union([z.undefined(), z.number()]).readonly().optional(),
   'backfillDays': z.number().readonly(),
   'backfillScope': z.union([z.literal("all"), z.literal("recent")]).readonly(),
   'pace': z.union([z.undefined(), z.object({
@@ -147,7 +148,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerExportResult',
         create: dsh_plugin_usage_ledger_usageLedgerPlugin_exportCsv_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":770,"column":9},
+      sourceLocation: {"file":"src/host/index.ts","line":772,"column":9},
     },
     {
       id: 'dsh-plugin-usage-ledger#usageLedgerPlugin/snapshot',
@@ -173,7 +174,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerSnapshot',
         create: dsh_plugin_usage_ledger_usageLedgerPlugin_snapshot_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":715,"column":9},
+      sourceLocation: {"file":"src/host/index.ts","line":717,"column":9},
     },
     {
       id: 'dsh-plugin-usage-ledger#usageLedgerPlugin/status',
@@ -189,7 +190,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         typeSymbol: 'dsh-plugin-usage-ledger/types#UsageLedgerStatus',
         create: dsh_plugin_usage_ledger_usageLedgerPlugin_status_result$schema,
       },
-      sourceLocation: {"file":"src/host/index.ts","line":822,"column":3},
+      sourceLocation: {"file":"src/host/index.ts","line":824,"column":3},
     },
   ],
 }

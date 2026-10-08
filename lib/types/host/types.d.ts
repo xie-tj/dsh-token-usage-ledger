@@ -144,6 +144,8 @@ export interface UsageLedgerStatus {
     readonly processedEvents: number;
     /** Historical sessions restored from unchanged source checkpoints during this run. */
     readonly reusedSessions?: number;
+    /** Selected historical lifecycles still awaiting a successful re-read. */
+    readonly failedSessions?: number;
     /** Automatic historical window in days. */
     readonly backfillDays: number;
     /** Whether the worker scans all history or only the recent priority window. */
