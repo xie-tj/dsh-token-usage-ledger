@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { SessionHandle } from '@deepseek-ai/dsh-session-persistence'
-import { workerSourceFingerprint, workerSourceIdentity, type WorkerReaderModule, type WorkerSourceFingerprint, type WorkerSourceStamp } from './host/worker-protocol.ts'
+import { UsageLedgerUnreadableSourceError, workerSourceFingerprint, workerSourceIdentity, type WorkerReaderModule, type WorkerSourceFingerprint, type WorkerSourceStamp } from './host/worker-protocol.ts'
 
 type Options = Readonly<Record<string, boolean | number | string>> | undefined
 
@@ -23,13 +23,13 @@ async function createProvider(options: Options) {
   const require=createRequire(config.providerModule)
   const {Context}=await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')).href) as typeof import('@deepseek-ai/cordis')
   const {SessionId}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-session')).href) as typeof import('@deepseek-ai/dsh-session')
-  const {SessionPersistenceNotFoundError}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-session-persistence')).href) as typeof import('@deepseek-ai/dsh-session-persistence')
+  const {SessionFormatUnsupportedError,SessionPersistenceNotFoundError}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-session-persistence')).href) as typeof import('@deepseek-ai/dsh-session-persistence')
   const {default:Jsonl}=await import(config.providerModule.href) as typeof import('@deepseek-ai/dsh-session-persistence-jsonl')
   const packageJson=JSON.parse(await readFile(require.resolve('@deepseek-ai/dsh-session-persistence-jsonl/package.json'),'utf8')) as {version:string}
   const ctx=new Context()
   const fiber=ctx.plugin(Jsonl,{root:config.root,compression:config.compression})
   try {await fiber.await()} catch (error: unknown) {await fiber.dispose();throw error}
-  return {provider:ctx.sessionPersistence as InstanceType<typeof Jsonl>,fiber,SessionId,SessionPersistenceNotFoundError,config,providerVersion:packageJson.version}
+  return {provider:ctx.sessionPersistence as InstanceType<typeof Jsonl>,fiber,SessionId,SessionFormatUnsupportedError,SessionPersistenceNotFoundError,config,providerVersion:packageJson.version}
 }
 
 type OpenedProvider = Awaited<ReturnType<typeof createProvider>>
@@ -153,7 +153,7 @@ export const readSessionBatches: WorkerReaderModule['readSessionBatches'] = asyn
   signal?.throwIfAborted()
   if (!Number.isSafeInteger(request.fromSeq) || request.fromSeq < 0) throw new TypeError('JSONL reader fromSeq must be nonnegative')
   if (!Number.isSafeInteger(request.batchEvents) || request.batchEvents < 1) throw new TypeError('JSONL reader batchEvents must be positive')
-  const {provider,SessionId,SessionPersistenceNotFoundError}=await openProvider(options)
+  const {provider,SessionId,SessionFormatUnsupportedError,SessionPersistenceNotFoundError}=await openProvider(options)
   let handle: SessionHandle | undefined
   try {
     try {
@@ -162,6 +162,9 @@ export const readSessionBatches: WorkerReaderModule['readSessionBatches'] = asyn
       // Live session notifications can precede physical materialization; a later
       // rescan observes the durable prefix without taking a write handle.
       if (error instanceof SessionPersistenceNotFoundError) return
+      // A refused historical generation stays byte-identical on disk, so the same reader can
+      // never decode it; the worker settles it once instead of retrying every pass.
+      if (error instanceof SessionFormatUnsupportedError) throw new UsageLedgerUnreadableSourceError(error.message)
       throw error
     }
     let offset=request.fromSeq

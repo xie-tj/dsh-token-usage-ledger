@@ -74,6 +74,7 @@ export function UsageBackfillStatus({ status, stale, t }: Props) {
       </div>
       <p className={css.backfillDescription}>{detail}</p>
       {(status?.reusedSessions ?? 0) > 0 ? <p className={css.backfillDescription}>{interpolate(t('backfillReused'), {sessions: number(status?.reusedSessions ?? 0)})}</p> : null}
+      {(status?.unreadableSessions ?? 0) > 0 ? <p className={css.backfillDescription}>{interpolate(t('backfillUnreadable'), {sessions: number(status?.unreadableSessions ?? 0)})}</p> : null}
       {error === undefined ? null : <p className={css.backfillError}>{error}</p>}
       {status === undefined && stale ? null : (
         <>

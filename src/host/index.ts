@@ -833,6 +833,11 @@ export class UsageLedgerService extends TypertRemoteService {
         // initialization failures stay until a healthy worker proves they are gone.
         const resolved = failedSessions === 0 && this.failureOwner === 'session'
         if (resolved) this.failureOwner = undefined
+        // A refused generation stays byte-identical, so the same reader never decodes it: report it
+        // once for diagnostics and keep the pass completing for every readable session.
+        if (frame.unreadableReason !== undefined && frame.unreadableReason !== this.status.unreadableReason) {
+          this.ctx.logger.warn('usage ledger: unreadable stored generation: ' + frame.unreadableReason)
+        }
         this.status = {
           ...this.status,
           state: !resolved && failedSessions > 0 && frame.status !== 'running' ? 'failed' : frame.status,
@@ -843,6 +848,8 @@ export class UsageLedgerService extends TypertRemoteService {
           discoveredSessions: frame.discoveredSessions ?? frame.totalSessions,
           historyComplete: frame.historyComplete ?? false,
           failedSessions,
+          unreadableSessions: frame.unreadableSessions ?? 0,
+          ...(frame.unreadableReason === undefined ? { unreadableReason: undefined } : { unreadableReason: frame.unreadableReason }),
           updatedAt: new Date().toISOString(),
           ...(resolved ? { lastError: undefined } : {}),
           ...(frame.currentSessionId === undefined ? { currentSessionId: undefined } : { currentSessionId: frame.currentSessionId }),

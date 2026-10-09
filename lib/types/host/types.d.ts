@@ -150,6 +150,10 @@ export interface UsageLedgerStatus {
     readonly historyComplete?: boolean;
     /** Selected historical lifecycles still awaiting a successful re-read. */
     readonly failedSessions?: number;
+    /** Selected lifecycles whose stored generation the installed DSH reader refuses to decode. */
+    readonly unreadableSessions?: number;
+    /** Reader refusal text behind the unreadable count, when one was observed. */
+    readonly unreadableReason?: string;
     /** Automatic historical window in days. */
     readonly backfillDays: number;
     /** Whether the worker scans all history or only the recent priority window. */

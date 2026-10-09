@@ -8,6 +8,7 @@ import type { UsageSessionEvent } from './host/event-types.ts'
 import {
   decodeWorkerFrame,
   encodeWorkerFrame,
+  isUnreadableSourceFailure,
   USAGE_LEDGER_WORKER_PROTOCOL,
 } from './host/worker-protocol.ts'
 import type {
@@ -43,6 +44,10 @@ const liveEvents = new Map<string, Map<number, UsageSessionEvent>>()
 // Unresolved per-lifecycle read failures; an entry is cleared only by that session reaching EOF.
 const unresolvedFailures = new Map<string, string>()
 const retriedSessions = new Set<string>()
+// Stored generations this reader refuses to decode; re-reading the same revision can never succeed.
+const unreadableSessions = new Set<string>()
+let unreadableReason: string | undefined
+let queuedUnreadable = 0
 let pumping = false
 let outputChain = Promise.resolve()
 let processedSessions = 0
@@ -147,8 +152,12 @@ function markProgress(
     processedEvents,
     reusedSessions,
     discoveredSessions,
-    historyComplete: historyPrepared && historyDone && processedSessions >= totalSessions && unresolvedFailures.size === 0,
+    historyComplete: historyPrepared && historyDone
+      && processedSessions + queuedUnreadable >= totalSessions
+      && unresolvedFailures.size === 0,
     failedSessions: unresolvedFailures.size,
+    unreadableSessions: unreadableSessions.size,
+    ...(unreadableReason === undefined ? {} : { unreadableReason }),
     ...(currentSessionId === undefined ? {} : { currentSessionId }),
     backfillDays: init?.config.backfillDays ?? 0,
   })
@@ -237,7 +246,13 @@ async function prepareHistory(): Promise<void> {
     const stamp=session.stamp
     // A listing fingerprint without a stored cursor is not an EOF proof; such a source is queued.
     const unchanged=stamp!==undefined && !liveEvents.has(session.id) && requireDatabase().sourceUnchangedAtSavedCursor(session,stamp)
+    // A generation this reader already refused is not pending work: it is decoded once, not per pass.
+    const refused=unchanged||stamp===undefined?undefined:requireDatabase().unreadableSourceReason(session,stamp)
     if(unchanged)reusedSessions+=1
+    else if(refused!==undefined) {
+      unreadableSessions.add(session.id)
+      unreadableReason ??= refused
+    }
     else {
       pending.push(session)
       historyOutstanding.set(session.id,session.createdAt)
@@ -408,15 +423,29 @@ async function pump(): Promise<void> {
         }
       } catch (error: unknown) {
         const message = errorMessage(error)
-        // One bounded retry absorbs a transient read failure; a repeat stays unresolved so a
-        // later pass repairs it instead of the drain reporting a healthy idle ledger.
-        if (task.kind === 'history' && !retriedSessions.has(task.session.id)) {
-          retriedSessions.add(task.session.id)
-          queuePriority(task)
+        if (isUnreadableSourceFailure(error)) {
+          // A read never rewrites the refused generation, so retrying the same revision cannot
+          // succeed. Settle it once, remember it, and keep the rest of the pass healthy.
+          unresolvedFailures.delete(task.session.id)
+          const stamp = task.session.stamp
+          if (stamp !== undefined) requireDatabase().markSourceUnreadable(task.session, stamp, message)
+          if (historyOutstanding.get(task.session.id) === task.session.createdAt) {
+            historyOutstanding.delete(task.session.id)
+            queuedUnreadable += 1
+          }
+          unreadableSessions.add(task.session.id)
+          unreadableReason ??= message
         } else {
-          unresolvedFailures.set(task.session.id, message)
+          // One bounded retry absorbs a transient read failure; a repeat stays unresolved so a
+          // later pass repairs it instead of the drain reporting a healthy idle ledger.
+          if (task.kind === 'history' && !retriedSessions.has(task.session.id)) {
+            retriedSessions.add(task.session.id)
+            queuePriority(task)
+          } else {
+            unresolvedFailures.set(task.session.id, message)
+          }
+          await send({ type: 'error', message, sessionId: task.session.id })
         }
-        await send({ type: 'error', message, sessionId: task.session.id })
       }
       if (performance.now() - lastProgressAt > 500) {
         lastProgressAt = performance.now()

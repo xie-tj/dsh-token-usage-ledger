@@ -14,7 +14,7 @@ import type {
 } from './spec.ts'
 
 /** Dedicated SQLite file format. It intentionally does not read v2/v3 stores. */
-export const USAGE_LEDGER_SQLITE_SCHEMA_VERSION = 5
+export const USAGE_LEDGER_SQLITE_SCHEMA_VERSION = 6
 
 /** SQLite application id used to reject unrelated user files. */
 export const USAGE_LEDGER_SQLITE_APPLICATION_ID = 0x44534c34
@@ -124,7 +124,9 @@ function configureDatabase(db: DatabaseSync, path: string): void {
   if (applicationId.application_id === 0 && userTables.length > 0) {
     throw new Error(`usage ledger database at "${path}" is not empty`)
   }
-  if (applicationId.application_id === USAGE_LEDGER_SQLITE_APPLICATION_ID && version.user_version !== 4 && version.user_version !== USAGE_LEDGER_SQLITE_SCHEMA_VERSION) {
+  // Every table is created with IF NOT EXISTS, so any earlier format upgrades in place.
+  if (applicationId.application_id === USAGE_LEDGER_SQLITE_APPLICATION_ID
+    && (version.user_version < 4 || version.user_version > USAGE_LEDGER_SQLITE_SCHEMA_VERSION)) {
     throw new Error(
       `usage ledger database at "${path}" has schema ${String(version.user_version)}, expected ${String(USAGE_LEDGER_SQLITE_SCHEMA_VERSION)}`,
     )
@@ -184,6 +186,16 @@ function configureDatabase(db: DatabaseSync, path: string): void {
         created_at INTEGER NOT NULL,
         fingerprint TEXT NOT NULL,
         observed_seq INTEGER NOT NULL CHECK (observed_seq >= -1),
+        PRIMARY KEY (source, session_id, created_at)
+      ) STRICT
+    `)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS unreadable_sources (
+        source TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        fingerprint TEXT NOT NULL,
+        reason TEXT NOT NULL,
         PRIMARY KEY (source, session_id, created_at)
       ) STRICT
     `)
@@ -353,6 +365,38 @@ export class UsageLedgerDatabase {
       SELECT ?,?,?,?,? WHERE COALESCE((SELECT observed_seq FROM sessions WHERE session_id=? AND created_at=?),-1)=?
       ON CONFLICT(source,session_id,created_at) DO UPDATE SET fingerprint=excluded.fingerprint,observed_seq=excluded.observed_seq
     `).run(stamp.source,session.id,session.createdAt,stamp.fingerprint,observedSeq,session.id,session.createdAt,observedSeq)
+    this.clearUnreadableSource(session)
+  }
+
+  /**
+   * Read the stored refusal for a source revision this reader could not decode.
+   * @param session - stored lifecycle identity.
+   * @param stamp - current reader source observation.
+   * @returns the recorded refusal text, or undefined when the revision is not marked.
+   */
+  unreadableSourceReason(session: {readonly id:string;readonly createdAt:number}, stamp: WorkerSourceStamp): string | undefined {
+    const row=this.db.prepare("SELECT fingerprint, reason FROM unreadable_sources WHERE source = ? AND session_id = ? AND created_at = ?").get(stamp.source,session.id,session.createdAt) as {fingerprint:string;reason:string}|undefined
+    // A rewritten generation carries a new fingerprint and is read again.
+    return row?.fingerprint===stamp.fingerprint ? row.reason : undefined
+  }
+
+  /**
+   * Remember a refused generation so later passes skip it without decoding it again.
+   * @param session - stored lifecycle identity.
+   * @param stamp - observation of the refused source revision.
+   * @param reason - reader refusal retained for diagnostics.
+   */
+  markSourceUnreadable(session: {readonly id:string;readonly createdAt:number}, stamp: WorkerSourceStamp, reason: string): void {
+    this.db.prepare(`
+      INSERT INTO unreadable_sources (source,session_id,created_at,fingerprint,reason)
+      VALUES (?,?,?,?,?)
+      ON CONFLICT(source,session_id,created_at) DO UPDATE SET fingerprint=excluded.fingerprint,reason=excluded.reason
+    `).run(stamp.source,session.id,session.createdAt,stamp.fingerprint,reason)
+  }
+
+  /** Drop a stale refusal once the stored generation is readable again. */
+  private clearUnreadableSource(session: {readonly id:string;readonly createdAt:number}): void {
+    this.db.prepare('DELETE FROM unreadable_sources WHERE session_id = ? AND created_at = ?').run(session.id,session.createdAt)
   }
 
   /** Apply a bounded mutation batch as one durable SQLite transaction. */

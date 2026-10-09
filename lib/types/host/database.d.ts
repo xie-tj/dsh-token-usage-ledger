@@ -4,7 +4,7 @@ import type { LedgerMutation } from './reducer.js';
 import type { WorkerSourceStamp } from './worker-protocol.js';
 import type { UsageLedgerCallRow, UsageLedgerSessionRow } from './spec.js';
 /** Dedicated SQLite file format. It intentionally does not read v2/v3 stores. */
-export declare const USAGE_LEDGER_SQLITE_SCHEMA_VERSION = 5;
+export declare const USAGE_LEDGER_SQLITE_SCHEMA_VERSION = 6;
 /** SQLite application id used to reject unrelated user files. */
 export declare const USAGE_LEDGER_SQLITE_APPLICATION_ID = 1146309684;
 /** One page of call rows scanned in timestamp/key order. */
@@ -78,6 +78,28 @@ export declare class UsageLedgerDatabase {
         readonly id: string;
         readonly createdAt: number;
     }, stamp: WorkerSourceStamp, observedSeq: number): void;
+    /**
+     * Read the stored refusal for a source revision this reader could not decode.
+     * @param session - stored lifecycle identity.
+     * @param stamp - current reader source observation.
+     * @returns the recorded refusal text, or undefined when the revision is not marked.
+     */
+    unreadableSourceReason(session: {
+        readonly id: string;
+        readonly createdAt: number;
+    }, stamp: WorkerSourceStamp): string | undefined;
+    /**
+     * Remember a refused generation so later passes skip it without decoding it again.
+     * @param session - stored lifecycle identity.
+     * @param stamp - observation of the refused source revision.
+     * @param reason - reader refusal retained for diagnostics.
+     */
+    markSourceUnreadable(session: {
+        readonly id: string;
+        readonly createdAt: number;
+    }, stamp: WorkerSourceStamp, reason: string): void;
+    /** Drop a stale refusal once the stored generation is readable again. */
+    private clearUnreadableSource;
     /** Apply a bounded mutation batch as one durable SQLite transaction. */
     applyMutations(mutations: readonly LedgerMutation[]): void;
     /** Load only one session's cursor and currently active call rows. */

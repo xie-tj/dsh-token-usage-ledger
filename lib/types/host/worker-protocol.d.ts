@@ -23,6 +23,21 @@ export interface WorkerSourceStamp {
 export declare function workerSourceIdentity(value: string): WorkerSourceIdentity;
 /** Brand a reader-generated fingerprint. @param value - durable metadata fingerprint. @returns branded fingerprint. */
 export declare function workerSourceFingerprint(value: string): WorkerSourceFingerprint;
+/** Stable failure code reported when a reader cannot decode the selected stored generation. */
+export declare const USAGE_LEDGER_UNREADABLE_SOURCE = "usage-ledger-unreadable-source";
+/** Failure raised for a stored generation the installed reader refuses to migrate. */
+export declare class UsageLedgerUnreadableSourceError extends Error {
+    /** Stable marker read across the reader/worker module boundary. */
+    readonly code = "usage-ledger-unreadable-source";
+    /** @param message - reader refusal text retained for diagnostics. */
+    constructor(message: string);
+}
+/**
+ * Whether one reader failure refuses the stored generation itself.
+ * @param error - failure observed while reading inside the worker.
+ * @returns true when re-reading the same source revision cannot succeed.
+ */
+export declare function isUnreadableSourceFailure(error: unknown): boolean;
 /** Runtime contract implemented by an isolated historical reader module. */
 export interface WorkerReaderModule {
     /** A lookup may use this pass's listing snapshot; verify must observe fresh metadata after EOF. */
@@ -127,6 +142,10 @@ export interface WorkerProgressFrame {
     readonly historyComplete?: boolean;
     /** Selected historical lifecycles that still need a successful re-read. */
     readonly failedSessions?: number;
+    /** Selected lifecycles whose stored generation this reader refuses to decode. */
+    readonly unreadableSessions?: number;
+    /** First refusal text observed for an unreadable generation, for Host diagnostics. */
+    readonly unreadableReason?: string;
     readonly currentSessionId?: string;
     readonly backfillDays: number;
 }
