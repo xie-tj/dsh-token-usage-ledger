@@ -158,6 +158,8 @@ function markProgress(
     failedSessions: unresolvedFailures.size,
     unreadableSessions: unreadableSessions.size,
     ...(unreadableReason === undefined ? {} : { unreadableReason }),
+    // The Host owns the worker's budget, so every status carries the footprint it paid for.
+    workerRssMiB: Math.round(process.memoryUsage().rss / (1024 * 1024)),
     ...(currentSessionId === undefined ? {} : { currentSessionId }),
     backfillDays: init?.config.backfillDays ?? 0,
   })

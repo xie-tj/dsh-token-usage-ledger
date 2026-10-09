@@ -162,6 +162,8 @@ export interface UsageLedgerStatus {
   readonly unreadableSessions?: number
   /** Reader refusal text behind the unreadable count, when one was observed. */
   readonly unreadableReason?: string
+  /** Resident memory of the history worker, in mebibytes; 0 while it is not running. */
+  readonly workerRssMiB?: number
   /** Automatic historical window in days. */
   readonly backfillDays: number
   /** Whether the worker scans all history or only the recent priority window. */

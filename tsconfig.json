@@ -10,6 +10,7 @@
     "src/types.ts",
     "src/host",
     "src/backfill-worker.ts",
-    "src/jsonl-reader.ts"
+    "src/jsonl-reader.ts",
+    "src/legacy-log.ts"
   ]
 }

@@ -94,6 +94,7 @@ export function UsageBackfillStatus({ status, stale, t }: Props) {
             <div><dt>{t('backfillSessions')}</dt><dd>{sessions}</dd></div>
             <div><dt>{t('backfillEvents')}</dt><dd>{status === undefined ? '—' : number(status.processedEvents)}</dd></div>
             <div><dt>{t('backfillRemaining')}</dt><dd>{knownTotal ? number(Math.max(0, status.totalSessions - status.processedSessions)) : '—'}</dd></div>
+            {(status?.workerRssMiB ?? 0) > 0 ? <div><dt>{t('backfillMemory')}</dt><dd>{String(number(status?.workerRssMiB ?? 0)) + ' MiB'}</dd></div> : null}
           </dl>
         </>
       )}

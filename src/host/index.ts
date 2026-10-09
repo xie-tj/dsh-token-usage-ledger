@@ -849,6 +849,7 @@ export class UsageLedgerService extends TypertRemoteService {
           historyComplete: frame.historyComplete ?? false,
           failedSessions,
           unreadableSessions: frame.unreadableSessions ?? 0,
+          workerRssMiB: frame.workerRssMiB ?? 0,
           ...(frame.unreadableReason === undefined ? { unreadableReason: undefined } : { unreadableReason: frame.unreadableReason }),
           updatedAt: new Date().toISOString(),
           ...(resolved ? { lastError: undefined } : {}),

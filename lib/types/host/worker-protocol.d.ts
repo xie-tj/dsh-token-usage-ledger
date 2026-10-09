@@ -146,6 +146,8 @@ export interface WorkerProgressFrame {
     readonly unreadableSessions?: number;
     /** First refusal text observed for an unreadable generation, for Host diagnostics. */
     readonly unreadableReason?: string;
+    /** Resident memory of this worker, so the Host can report the footprint it owns. */
+    readonly workerRssMiB?: number;
     readonly currentSessionId?: string;
     readonly backfillDays: number;
 }

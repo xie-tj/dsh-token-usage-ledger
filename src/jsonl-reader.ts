@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { SessionHandle } from '@deepseek-ai/dsh-session-persistence'
+import { readLegacyBatches, storedLogPath } from './legacy-log.ts'
 import { UsageLedgerUnreadableSourceError, workerSourceFingerprint, workerSourceIdentity, type WorkerReaderModule, type WorkerSourceFingerprint, type WorkerSourceStamp } from './host/worker-protocol.ts'
 
 type Options = Readonly<Record<string, boolean | number | string>> | undefined
@@ -153,7 +154,7 @@ export const readSessionBatches: WorkerReaderModule['readSessionBatches'] = asyn
   signal?.throwIfAborted()
   if (!Number.isSafeInteger(request.fromSeq) || request.fromSeq < 0) throw new TypeError('JSONL reader fromSeq must be nonnegative')
   if (!Number.isSafeInteger(request.batchEvents) || request.batchEvents < 1) throw new TypeError('JSONL reader batchEvents must be positive')
-  const {provider,SessionId,SessionFormatUnsupportedError,SessionPersistenceNotFoundError}=await openProvider(options)
+  const {provider,SessionId,SessionFormatUnsupportedError,SessionPersistenceNotFoundError,config}=await openProvider(options)
   let handle: SessionHandle | undefined
   try {
     try {
@@ -162,9 +163,18 @@ export const readSessionBatches: WorkerReaderModule['readSessionBatches'] = asyn
       // Live session notifications can precede physical materialization; a later
       // rescan observes the durable prefix without taking a write handle.
       if (error instanceof SessionPersistenceNotFoundError) return
-      // A refused historical generation stays byte-identical on disk, so the same reader can
-      // never decode it; the worker settles it once instead of retrying every pass.
-      if (error instanceof SessionFormatUnsupportedError) throw new UsageLedgerUnreadableSourceError(error.message)
+      if (error instanceof SessionFormatUnsupportedError) {
+        // The migration refuses the generation, but the rows it would have migrated are the same
+        // records the reducer reads. Stream the stored log in place instead of dropping the session.
+        const stored = storedLogPath(error)
+        if (stored !== undefined && config.compression === 'zstd') {
+          yield* readLegacyBatches(stored, request, signal)
+          return
+        }
+        // Without a readable stored path there is nothing to fall back to; the worker settles the
+        // generation once instead of retrying a revision that can never decode.
+        throw new UsageLedgerUnreadableSourceError(error.message)
+      }
       throw error
     }
     let offset=request.fromSeq
