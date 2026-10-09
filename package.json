@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-usage-ledger",
-  "version": "0.9.11",
+  "version": "0.9.12",
   "description": "Persistent model usage ledger and Web Usage dashboard for DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",

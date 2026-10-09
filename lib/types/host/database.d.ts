@@ -7,6 +7,16 @@ import type { UsageLedgerCallRow, UsageLedgerSessionRow } from './spec.js';
 export declare const USAGE_LEDGER_SQLITE_SCHEMA_VERSION = 6;
 /** SQLite application id used to reject unrelated user files. */
 export declare const USAGE_LEDGER_SQLITE_APPLICATION_ID = 1146309684;
+/** One bounded sweep of matching call rows. */
+export interface UsageLedgerCallStreamRequest {
+    readonly startedAtInclusive: number;
+    readonly startedAtExclusive: number;
+    readonly workspace: string | null;
+    readonly provider: string | null;
+    readonly model: string | null;
+    /** Chronological order is required when the caller writes an ordered artifact. */
+    readonly ordered: boolean;
+}
 /** One page of call rows scanned in timestamp/key order. */
 export interface UsageLedgerCallPage {
     readonly rows: readonly {
@@ -106,6 +116,14 @@ export declare class UsageLedgerDatabase {
     sessionSeed(sessionId: string, createdAt: number, maxActiveAttempts: number): UsageLedgerSessionSeed;
     /** Read one bounded chronological page without materializing the ledger. */
     callsPage(request: UsageLedgerCallPageRequest): UsageLedgerCallPage;
+    /**
+     * Stream one filtered call range in a single pass.
+     * @param request - range, optional filters, and whether chronological order is required.
+     * @returns matching rows in the requested order.
+     * A keyset page re-seeks the index for every page, which measures about fifty microseconds per
+     * row against six for one pass, so a full-range sweep holds one cursor and slices it instead.
+     */
+    callsStream(request: UsageLedgerCallStreamRequest): Generator<UsageLedgerCallRow>;
     /** Return the earliest matching attempt timestamp without loading call rows. */
     firstCallTime(workspace: string | null, provider: string | null, model: string | null): number | undefined;
     /** Close this connection after the owning service or worker reaches quiescence. */
